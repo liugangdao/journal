@@ -1,6 +1,5 @@
 import { Router } from 'express'
 import db from '../db.js'
-import requireQuota from '../middleware/requireQuota.js'
 
 const router = Router()
 
@@ -75,7 +74,7 @@ router.get('/', (req, res) => {
 })
 
 // POST /api/trades - create trade (open, closed, or missed)
-router.post('/', requireQuota, (req, res) => {
+router.post('/', (req, res) => {
   try {
     const userId = req.userId
     const { open_time, close_time, pair, direction, strategy, timeframe, lots, entry, stop, target, exit_price, gross_pnl, swap, score, emotion, notes, status, risk_amount } = req.body
