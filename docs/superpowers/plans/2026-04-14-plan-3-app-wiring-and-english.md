@@ -94,13 +94,15 @@ journal/
 
 ---
 
-## Task 1: Extend `tradeCalc.ts` with `calcStats` (port from legacy)
+## Task 1: Extend `tradeCalc.ts` with `calcStats` AND update Dashboard/PsychologyPanel callers in one task
 
 **Files:**
 - Modify: `client/src/lib/tradeCalc.ts`
-- Modify: `client/__tests__/calc.test.ts` — add 1 test for calcStats aggregation
+- Modify: `client/__tests__/calc.test.ts` — add 2 tests for calcStats aggregation
+- Modify: `client/src/components/Dashboard.jsx` — swap caller + add useMemo
+- Modify: `client/src/components/PsychologyPanel.jsx` — swap caller + add useMemo
 
-The legacy `calc.js` has a big `calcStats(trades)` aggregator that Dashboard and PsychologyPanel depend on. It must move into `tradeCalc.ts` with the same output shape so the components can swap imports without changing their own logic. The new version dispatches per-trade via the polymorphic `calcTrade` but the aggregation (win rate, profit factor, breakdowns by pair/strategy/emotion, cumulative P&L curve, streaks) is the same.
+The legacy `calc.js` has a big `calcStats(trades)` aggregator that Dashboard and PsychologyPanel depend on. It must move into `tradeCalc.ts` with a new signature `calcStats(trades, pairsByName)` that dispatches per-trade via the polymorphic `calcTrade`. **The callers must be updated in the same task** — otherwise Dashboard and PsychologyPanel break for the 7 commits between this task and the old "Task 9" useMemo pass. This task folds that caller work in so every intermediate commit is renderable.
 
 - [ ] **Step 1: Read the legacy `calcStats` to understand its full output shape.**
 
@@ -354,26 +356,62 @@ export function calcStats(
 }
 ```
 
-- [ ] **Step 5: Run tests — expect pass.**
+- [ ] **Step 5: Update `Dashboard.jsx` — swap import + wrap with useMemo.**
+
+Change the import at the top:
+
+```jsx
+import { calcStats } from '../lib/tradeCalc'
+```
+
+Add `useMemo` to the React imports if missing. Replace the existing `calcStats(trades)` call site with:
+
+```jsx
+const pairsByName = useMemo(
+  () => new Map(pairs.map((p) => [p.name, p])),
+  [pairs]
+)
+const stats = useMemo(() => calcStats(trades, pairsByName), [trades, pairsByName])
+```
+
+For every `<LineChart>` / `<BarChart>` / `<AreaChart>` inside Dashboard.jsx where the `data={...}` prop computes inline, extract to a useMemo:
+
+```jsx
+const cumPnlData = useMemo(() => stats?.cumPnl ?? [], [stats])
+const byPairData = useMemo(() => stats?.byPair ?? [], [stats])
+// ...one per chart
+```
+
+And reference the memoized names in `data={cumPnlData}`.
+
+- [ ] **Step 6: Update `PsychologyPanel.jsx` — same pattern.**
+
+Swap import, use the same `pairsByName` / `useMemo(() => calcStats(...))` pattern. Memoize every chart data array.
+
+- [ ] **Step 7: Run tests — expect pass.**
 
 ```bash
 cd /home/lz/workspace/journal
 pnpm test 2>&1 | tail -10
 ```
 
-Expected: 34 + 2 = 36 tests pass.
+Expected: 34 + 2 = 36 tests pass. Additionally, Dashboard and PsychologyPanel still compile (vitest picks up import errors even without explicit tests for them).
 
-- [ ] **Step 6: Commit.**
+- [ ] **Step 8: Commit.**
 
 ```bash
 git add -A
-git -c user.email="lz@basiscalc.xyz" -c user.name="lz" commit -m "feat: move calcStats into tradeCalc.ts with polymorphic dispatch
+git -c user.email="lz@basiscalc.xyz" -c user.name="lz" commit -m "feat: move calcStats into tradeCalc.ts + memoize Dashboard/Psychology
 
 calcStats now takes trades and a pairs-by-name Map, enriches each
 trade via the polymorphic calcTrade (forex pips vs crypto gross_pnl
 vs metals/energy pip-based), and returns the same aggregate shape
-that Dashboard and PsychologyPanel consume. 2 new tests cover the
-empty-input and mixed-asset-class happy paths.
+that Dashboard and PsychologyPanel consume. Both callers updated
+in the same commit so the app stays renderable between Task 1 and
+Task 9. useMemo wraps calcStats and every Recharts data array
+(spec §9 Fix 3, applied early).
+
+2 new tests cover the empty-input and mixed-asset-class happy paths.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 git push
@@ -1059,8 +1097,14 @@ git push
 
 **Files:**
 - Modify: `client/src/App.jsx`
+- Modify: `client/src/components/Layout.jsx`
+- Modify: `server/index.js` (root redirect)
 
-This is the largest task. Replace the three effects that load data via `api.*` with effects that call `storeAdapter.*` and read `isAuthenticated` from `useStore`. Show the full app to anonymous users. Add SignInButton to the Layout header for anonymous users.
+This is the largest task. Execute in **four separate commits** (6a → 6b → 6c → 6d) so a mistake in any phase is revertable without losing the others. Each commit must leave the test suite green and the dev server bootable. After 6a the app still works the legacy way (via `api.*`), minus deleted features. After 6b the app uses `storeAdapter` but still requires sign-in. After 6c anonymous users see the app. After 6d the migration trigger flows and the root path redirects to `/app`.
+
+### Sub-task 6a: Strip orphan state and effects from deleted features
+
+Remove everything referencing features deleted in Task 2: `isTelegram`, `tg`, `useTelegram`, `quota`, `showUpgrade`, `UpgradeModal`, `QuotaBanner`, the `AuthPage` render branch. Keep the `useApi`-based data flow unchanged — this commit is pure subtraction.
 
 - [ ] **Step 1: Read App.jsx top (first 180 lines).**
 
@@ -1069,6 +1113,42 @@ head -180 /home/lz/workspace/journal/client/src/App.jsx
 ```
 
 Understand the current flow: `authUser` state, session check, data load in `reloadData`, and conditional rendering (`authUser ? <Layout> : <LandingPage>`).
+
+- [ ] **Step 1b: Delete orphan state, effects, JSX.**
+
+In App.jsx, delete:
+- `import { useTelegram, tg } from './hooks/useTelegram'` (already removed in Task 2 by deleting useTelegram.js; make sure the import line is gone).
+- `import QuotaBanner from './components/QuotaBanner'` and any `<QuotaBanner ... />` in JSX.
+- `import UpgradeModal from './components/UpgradeModal'` and any `<UpgradeModal ... />` in JSX.
+- `import AuthPage from './components/AuthPage'` and any `<AuthPage ... />` in the conditional-render branch (leave the LandingPage branch untouched for now — Sub-task 6c handles it).
+- `const isTelegram = useTelegram()` line.
+- `const [quota, setQuota] = useState(null)` and every `setQuota` or `quota` read.
+- `const [showUpgrade, setShowUpgrade] = useState(false)` and every `setShowUpgrade` or `showUpgrade` read.
+- The useEffect block that branches on `isTelegram` to call `api.telegramAuth()` — replace with just `api.getMe()` unconditional.
+- The useEffect that calls `api.getQuota()` (entire block).
+- Any `api.getQuota()` call inside other handlers.
+
+- [ ] **Step 1c: Commit 6a.**
+
+```bash
+cd /home/lz/workspace/journal
+pnpm test 2>&1 | tail -6
+git add -A
+git -c user.email="lz@basiscalc.xyz" -c user.name="lz" commit -m "refactor(App.jsx): strip orphan state from deleted features
+
+Removes isTelegram/quota/showUpgrade state and effects. Still uses
+api.* — Sub-task 6b swaps to storeAdapter. App still requires
+sign-in — Sub-task 6c removes the gate.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+git push
+```
+
+---
+
+### Sub-task 6b: Replace every `api.*` call with `storeAdapter.*`
+
+Pure mechanical rename. No behavior change.
 
 - [ ] **Step 2: Replace the imports block at the top of App.jsx.**
 
@@ -1122,6 +1202,26 @@ grep -n "api\." /home/lz/workspace/journal/client/src/App.jsx
 ```
 
 For each hit, replace `api.` with `storeAdapter.`. Exception: the auth-check effect at the top of App.jsx (which reads from `authUser` state) — that entire effect is replaced in Step 5.
+
+- [ ] **Step 4b: Commit 6b.**
+
+```bash
+cd /home/lz/workspace/journal
+pnpm test 2>&1 | tail -6
+git add -A
+git -c user.email="lz@basiscalc.xyz" -c user.name="lz" commit -m "refactor(App.jsx): swap api.* calls to storeAdapter.*
+
+Mechanical rename. storeAdapter is wired from useStoreAdapter(store)
+where store comes from useStore. App.jsx imports updated. No
+behavior change in this commit — sub-task 6c changes rendering.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+git push
+```
+
+---
+
+### Sub-task 6c: Render guard change — anonymous users see the app
 
 - [ ] **Step 5: Replace the two auth-check effects with a simple derived value.**
 
@@ -1184,6 +1284,46 @@ return (
 
 Read `client/src/components/Layout.jsx` and add the three new props. Render `signInSlot` in the header right-side; if `userEmail` is present, render a small user chip with an `onLogout` handler attached to a sign-out link.
 
+- [ ] **Step 7b: Commit 6c.**
+
+```bash
+cd /home/lz/workspace/journal
+pnpm test 2>&1 | tail -6
+git add -A
+git -c user.email="lz@basiscalc.xyz" -c user.name="lz" commit -m "feat(App.jsx): anonymous users render full app + SignInButton in header
+
+Removed the LandingPage/AuthPage gate. Layout accepts signInSlot,
+userEmail, onLogout props. Next sub-task adds the migration
+trigger effect and root-path redirect.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+git push
+```
+
+---
+
+### Sub-task 6d: Migration trigger + data reload + root redirect
+
+- [ ] **Step 7c: Add root redirect in server/index.js.**
+
+Plan 1 Task 12 had `server/index.js` answer `GET /` with a plaintext "under construction". With anonymous mode now live, users landing on `/` should reach the app. Edit `server/index.js`:
+
+Find the block:
+```js
+app.get('/', (req, res) => {
+  res.type('text/plain').send('journal.basiscalc.xyz — under construction')
+})
+```
+
+Replace with:
+```js
+app.get('/', (req, res) => {
+  res.redirect(302, '/app')
+})
+```
+
+Plan 4 will replace this with a real landing page at `/`; for now the redirect gets anonymous users into the functioning app.
+
 - [ ] **Step 8: Run type check / lint / tests.**
 
 ```bash
@@ -1215,17 +1355,16 @@ Open `http://localhost:3000/` in a browser (if the test environment has a browse
 - 33 default pairs available in the pair dropdown (seeded from LocalStore)
 - 18 default policies under the Policy tab
 
-- [ ] **Step 10: Commit.**
+- [ ] **Step 10: Commit 6d.**
 
 ```bash
 git add -A
-git -c user.email="lz@basiscalc.xyz" -c user.name="lz" commit -m "feat: wire useStore + useStoreAdapter + useMigrationTrigger into App.jsx
+git -c user.email="lz@basiscalc.xyz" -c user.name="lz" commit -m "feat: wire useMigrationTrigger + root redirect to /app
 
-Anonymous users see the full app with LocalStore backing.
-Signed-in users hit ApiStore. Migration trigger on
-?just_signed_in=1 drains local → server. Removed the
-LandingPage/AuthPage gate and all references to Telegram,
-quota, and upgrade.
+Anonymous users landing on / now redirect to /app. useMigrationTrigger
+fires on ?just_signed_in=1 to drain local → server. Data reload
+effect reacts to isAuthenticated and migrationStatus changes so
+users see their migrated trades immediately after sign-in.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 git push
@@ -1493,60 +1632,34 @@ git push
 
 ---
 
-## Task 9: Perf Fix 3 — useMemo on calcStats and Recharts data
+## Task 9: Verify perf Fix 3 coverage — any remaining unmemoized charts
 
-**Files:**
-- Modify: `client/src/components/Dashboard.jsx`
-- Modify: `client/src/components/PsychologyPanel.jsx`
+**Files:** grep-only audit; edit any hits.
 
-Spec §9 Fix 3 requires `useMemo` wrappers around `calcStats(trades)` results and every Recharts `data=` prop so that re-renders of unrelated App.jsx state do not recompute the stat pipeline or rebuild chart data arrays.
+Task 1 already memoized Dashboard and PsychologyPanel. This task is a safety-net audit for any other component that renders Recharts (OpenPositions, TradeTable, PsychologyPanel's sub-panels, etc.) and might have been missed.
 
-- [ ] **Step 1: In Dashboard.jsx, find the `calcStats` call site.**
-
-Likely looks like:
-
-```jsx
-const stats = calcStats(trades, spreadCostMap)
-```
-
-Wrap with useMemo:
-
-```jsx
-const pairsByName = useMemo(
-  () => new Map(pairs.map((p) => [p.name, p])),
-  [pairs]
-)
-const stats = useMemo(() => calcStats(trades, pairsByName), [trades, pairsByName])
-```
-
-(Note: `spreadCostMap` is legacy — the new `calcStats` signature takes `pairsByName: Map<string, Pair>`. This also changes the call site.)
-
-- [ ] **Step 2: Find every `<LineChart>` / `<BarChart>` / `<AreaChart>` / similar `data={...}` in Dashboard.jsx.**
-
-For each, if the data is computed inline (e.g., `data={stats.cumPnl.map(x => ...)}`), extract to a useMemo:
-
-```jsx
-const cumPnlData = useMemo(
-  () => stats?.cumPnl ?? [],
-  [stats]
-)
-// ...
-<LineChart data={cumPnlData}>...</LineChart>
-```
-
-Do this for each chart data array.
-
-- [ ] **Step 3: Apply the same pattern in PsychologyPanel.jsx.**
-
-- [ ] **Step 4: Make sure `useMemo` is imported.**
+- [ ] **Step 1: Grep for unmemoized Recharts `data=` usages.**
 
 ```bash
-grep -n "useMemo" client/src/components/Dashboard.jsx client/src/components/PsychologyPanel.jsx
+cd /home/lz/workspace/journal
+grep -rn "data={" client/src/components/ --include="*.jsx" | grep -iE "LineChart|BarChart|AreaChart|PieChart|RadarChart"
 ```
 
-If missing, add to the existing `import { useState, useEffect } from 'react'` line.
+- [ ] **Step 2: For each hit, check whether the value passed is already a `useMemo` result.**
 
-- [ ] **Step 5: Run tests.**
+If `data={stats.byPair}` is passed where `stats = useMemo(() => calcStats(...), [...])`, then `stats.byPair` is stable across renders when trades/pairs don't change — no extra memo needed.
+
+If `data={trades.map(t => ...)}` is inline, wrap the expression in `useMemo`:
+
+```jsx
+const tradeChartData = useMemo(
+  () => trades.map((t) => ({ x: t.open_time, y: t.gross_pnl })),
+  [trades]
+)
+<LineChart data={tradeChartData}>...</LineChart>
+```
+
+- [ ] **Step 3: Run tests.**
 
 ```bash
 cd /home/lz/workspace/journal
@@ -1555,20 +1668,22 @@ pnpm test 2>&1 | tail -6
 
 Expected: 36 tests continue to pass.
 
-- [ ] **Step 6: Commit.**
+- [ ] **Step 4: Commit only if anything changed.**
 
 ```bash
+git diff --stat
+# If there are changes:
 git add -A
-git -c user.email="lz@basiscalc.xyz" -c user.name="lz" commit -m "perf: useMemo calcStats + Recharts data arrays (spec §9 Fix 3)
+git -c user.email="lz@basiscalc.xyz" -c user.name="lz" commit -m "perf: memoize remaining Recharts data arrays across client
 
-Re-renders of unrelated App.jsx state (tab switches, filter
-changes, form toggles) no longer recompute the stats pipeline or
-rebuild chart data arrays. calcStats is now called with a
-pairsByName Map memoized from the pairs state.
+Safety-net audit after Task 1. Any chart that still received an
+inline-computed data prop now reads from a useMemo result.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 git push
 ```
+
+If `git diff --stat` shows no changes, skip the commit — Task 1's memoization already covered every chart.
 
 ---
 
