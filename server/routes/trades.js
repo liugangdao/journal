@@ -3,25 +3,6 @@ import db from '../db.js'
 
 const router = Router()
 
-// GET /api/trades/quota — current month usage for free users
-router.get('/quota', (req, res) => {
-  try {
-    const user = db.prepare('SELECT plan, plan_expires_at FROM users WHERE id = ?').get(req.userId)
-    const isPremium = user.plan === 'premium' && user.plan_expires_at && new Date(user.plan_expires_at) > new Date()
-    if (isPremium) {
-      return res.json({ plan: 'premium', used: 0, limit: 0 })
-    }
-    const now = new Date()
-    const monthStart = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01T00:00:00`
-    const count = db.prepare(
-      'SELECT COUNT(*) as count FROM trades WHERE user_id = ? AND created_at >= ?'
-    ).get(req.userId, monthStart).count
-    res.json({ plan: 'free', used: count, limit: 15 })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
 // GET /api/trades - list trades with optional filtering and pagination
 router.get('/', (req, res) => {
   try {
@@ -29,7 +10,7 @@ router.get('/', (req, res) => {
     const { date_from, date_to, pair, direction, sort, order, limit, offset } = req.query
 
     const sortOrder = order === 'asc' ? 'ASC' : 'DESC'
-    const allowed = ['id', 'open_time', 'pair', 'gross_pnl', 'created_at']
+    const allowed = ['id', 'open_time', 'pair', 'gross_pnl', 'created_at', 'asset_class']
     const sortCol = allowed.includes(sort) ? sort : 'open_time'
 
     const conditions = ['user_id = ?']
@@ -77,13 +58,19 @@ router.get('/', (req, res) => {
 router.post('/', (req, res) => {
   try {
     const userId = req.userId
-    const { open_time, close_time, pair, direction, strategy, timeframe, lots, entry, stop, target, exit_price, gross_pnl, swap, score, emotion, notes, status, risk_amount } = req.body
+    const {
+      external_id, asset_class, quantity,
+      open_time, close_time, pair, direction, strategy, timeframe, lots,
+      entry, stop, target, exit_price, gross_pnl, swap, score, emotion,
+      notes, status, risk_amount,
+    } = req.body
     const tradeStatus = status || 'open'
     const now = new Date()
-    const tradeOpenTime = open_time || `${now.toISOString().split('T')[0]}T${now.toTimeString().slice(0,5)}`
+    const tradeOpenTime = open_time || `${now.toISOString().split('T')[0]}T${now.toTimeString().slice(0, 5)}`
     const tradeCloseTime = close_time || null
-    const tradeStrategy = strategy || '趋势跟踪'
+    const tradeStrategy = strategy || 'trend'
     const tradeTimeframe = timeframe || 'H4'
+    const tradeAssetClass = asset_class || 'forex'
 
     if (tradeStatus === 'missed') {
       if (!pair || !direction) {
@@ -98,12 +85,18 @@ router.post('/', (req, res) => {
       }
     }
     const stmt = db.prepare(`
-      INSERT INTO trades (user_id, open_time, close_time, pair, direction, strategy, timeframe, lots, entry, stop, target, exit_price, gross_pnl, swap, score, emotion, notes, status, risk_amount)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO trades (user_id, external_id, asset_class, open_time, close_time, pair, direction, strategy, timeframe, lots, quantity, entry, stop, target, exit_price, gross_pnl, swap, score, emotion, notes, status, risk_amount)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     const defaultEntry = tradeStatus === 'missed' ? 0 : entry
     const defaultStop = tradeStatus === 'missed' ? 0 : stop
-    const result = stmt.run(userId, tradeOpenTime, tradeCloseTime, pair, direction, tradeStrategy, tradeTimeframe, lots || null, defaultEntry ?? null, defaultStop ?? null, target || null, exit_price ?? null, gross_pnl ?? null, swap || 0, score || null, emotion || null, notes || null, tradeStatus, risk_amount ?? null)
+    const result = stmt.run(
+      userId, external_id ?? null, tradeAssetClass, tradeOpenTime, tradeCloseTime,
+      pair, direction, tradeStrategy, tradeTimeframe, lots || null, quantity ?? null,
+      defaultEntry ?? null, defaultStop ?? null, target || null, exit_price ?? null,
+      gross_pnl ?? null, swap || 0, score || null, emotion || null, notes || null,
+      tradeStatus, risk_amount ?? null
+    )
     const trade = db.prepare('SELECT * FROM trades WHERE id = ?').get(result.lastInsertRowid)
     res.status(201).json(trade)
   } catch (err) {
@@ -115,7 +108,12 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   try {
     const userId = req.userId
-    const { open_time, close_time, pair, direction, strategy, timeframe, lots, entry, stop, target, exit_price, gross_pnl, swap, score, emotion, notes, status, risk_amount } = req.body
+    const {
+      asset_class, quantity,
+      open_time, close_time, pair, direction, strategy, timeframe, lots,
+      entry, stop, target, exit_price, gross_pnl, swap, score, emotion,
+      notes, status, risk_amount,
+    } = req.body
     const existing = db.prepare('SELECT * FROM trades WHERE id = ? AND user_id = ?').get(req.params.id, userId)
     if (!existing) return res.status(404).json({ error: 'Trade not found' })
 
@@ -129,17 +127,22 @@ router.put('/:id', (req, res) => {
     }
 
     const stmt = db.prepare(`
-      UPDATE trades SET open_time=?, close_time=?, pair=?, direction=?, strategy=?, timeframe=?, lots=?, entry=?, stop=?, target=?, exit_price=?, gross_pnl=?, swap=?, score=?, emotion=?, notes=?, status=?, risk_amount=?, updated_at=datetime('now')
+      UPDATE trades SET asset_class=?, open_time=?, close_time=?, pair=?, direction=?, strategy=?, timeframe=?, lots=?, quantity=?, entry=?, stop=?, target=?, exit_price=?, gross_pnl=?, swap=?, score=?, emotion=?, notes=?, status=?, risk_amount=?, updated_at=datetime('now')
       WHERE id=? AND user_id=?
     `)
     stmt.run(
-      open_time ?? existing.open_time, close_time !== undefined ? close_time : existing.close_time,
+      asset_class ?? existing.asset_class,
+      open_time ?? existing.open_time,
+      close_time !== undefined ? close_time : existing.close_time,
       pair ?? existing.pair, direction ?? existing.direction,
-      strategy ?? existing.strategy, timeframe ?? existing.timeframe, lots || existing.lots,
+      strategy ?? existing.strategy, timeframe ?? existing.timeframe,
+      lots || existing.lots,
+      quantity ?? existing.quantity,
       entry ?? existing.entry, stop ?? existing.stop, target || existing.target,
       exit_price ?? null, gross_pnl ?? null, swap || 0,
       score || null, emotion || null, notes || null,
-      tradeStatus, risk_amount ?? existing.risk_amount, req.params.id, userId
+      tradeStatus, risk_amount ?? existing.risk_amount,
+      req.params.id, userId
     )
     const trade = db.prepare('SELECT * FROM trades WHERE id = ?').get(req.params.id)
     res.json(trade)
@@ -155,6 +158,101 @@ router.delete('/:id', (req, res) => {
     const existing = db.prepare('SELECT * FROM trades WHERE id = ? AND user_id = ?').get(req.params.id, userId)
     if (!existing) return res.status(404).json({ error: 'Trade not found' })
     db.prepare('DELETE FROM trades WHERE id = ? AND user_id = ?').run(req.params.id, userId)
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/trades/by-external/:external_id - lookup by client UUID
+router.get('/by-external/:external_id', (req, res) => {
+  try {
+    const trade = db.prepare('SELECT * FROM trades WHERE user_id = ? AND external_id = ?')
+      .get(req.userId, req.params.external_id)
+    if (!trade) return res.status(404).json({ error: 'Trade not found' })
+    res.json(trade)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// PUT /api/trades/by-external/:external_id - upsert by client UUID
+router.put('/by-external/:external_id', (req, res) => {
+  try {
+    const existing = db.prepare('SELECT * FROM trades WHERE user_id = ? AND external_id = ?')
+      .get(req.userId, req.params.external_id)
+    if (!existing) return res.status(404).json({ error: 'Trade not found' })
+    const merged = { ...existing, ...req.body }
+    db.prepare(`
+      UPDATE trades SET
+        asset_class = ?, pair = ?, direction = ?, strategy = ?, timeframe = ?,
+        lots = ?, quantity = ?, entry = ?, stop = ?, target = ?, exit_price = ?,
+        gross_pnl = ?, swap = ?, score = ?, emotion = ?, notes = ?, status = ?,
+        risk_amount = ?, close_time = ?, open_time = ?, updated_at = datetime('now')
+      WHERE user_id = ? AND external_id = ?
+    `).run(
+      merged.asset_class, merged.pair, merged.direction, merged.strategy, merged.timeframe,
+      merged.lots, merged.quantity, merged.entry, merged.stop, merged.target, merged.exit_price,
+      merged.gross_pnl, merged.swap ?? 0, merged.score, merged.emotion, merged.notes, merged.status,
+      merged.risk_amount, merged.close_time, merged.open_time,
+      req.userId, req.params.external_id
+    )
+    const updated = db.prepare('SELECT * FROM trades WHERE user_id = ? AND external_id = ?')
+      .get(req.userId, req.params.external_id)
+    res.json(updated)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// DELETE /api/trades/by-external/:external_id
+router.delete('/by-external/:external_id', (req, res) => {
+  try {
+    const info = db.prepare('DELETE FROM trades WHERE user_id = ? AND external_id = ?')
+      .run(req.userId, req.params.external_id)
+    if (info.changes === 0) return res.status(404).json({ error: 'Trade not found' })
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/trades/by-external/:external_id/violations
+router.get('/by-external/:external_id/violations', (req, res) => {
+  try {
+    const trade = db.prepare('SELECT id FROM trades WHERE user_id = ? AND external_id = ?')
+      .get(req.userId, req.params.external_id)
+    if (!trade) return res.status(404).json({ error: 'Trade not found' })
+    const rows = db.prepare(`
+      SELECT tv.*, p.external_id AS policy_external_id, p.title AS policy_title
+      FROM trade_violations tv
+      JOIN policies p ON p.id = tv.policy_id
+      WHERE tv.trade_id = ?
+    `).all(trade.id)
+    res.json(rows)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// PUT /api/trades/by-external/:external_id/violations
+router.put('/by-external/:external_id/violations', (req, res) => {
+  try {
+    const trade = db.prepare('SELECT id FROM trades WHERE user_id = ? AND external_id = ?')
+      .get(req.userId, req.params.external_id)
+    if (!trade) return res.status(404).json({ error: 'Trade not found' })
+    const policyExternalIds = Array.isArray(req.body?.policy_external_ids)
+      ? req.body.policy_external_ids
+      : []
+    const run = db.transaction(() => {
+      db.prepare('DELETE FROM trade_violations WHERE trade_id = ?').run(trade.id)
+      const insertVio = db.prepare(`
+        INSERT INTO trade_violations (trade_id, policy_id)
+        SELECT ?, p.id FROM policies p WHERE p.user_id = ? AND p.external_id = ?
+      `)
+      for (const pe of policyExternalIds) insertVio.run(trade.id, req.userId, pe)
+    })
+    run()
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })
