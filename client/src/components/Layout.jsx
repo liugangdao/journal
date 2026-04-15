@@ -46,12 +46,17 @@ export default function Layout({
           {/* Fixed Header */}
           <header className="sticky top-0 z-50 backdrop-blur-xl bg-header-bg border-b border-border">
             <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between flex-wrap gap-3">
-              <div>
-                <h1 className="text-lg sm:text-xl font-bold tracking-tight">{en.app.titleShort}</h1>
+              <button
+                type="button"
+                onClick={() => setTab('stats')}
+                className="text-left cursor-pointer group"
+                aria-label={en.app.titleShort}
+              >
+                <h1 className="text-lg sm:text-xl font-bold tracking-tight group-hover:text-accent transition-colors">{en.app.titleShort}</h1>
                 <p className="text-[10px] sm:text-xs text-muted mt-0.5">
                   {en.app.tagline} &nbsp;|&nbsp; {tradeCount} {en.app.closedCount}{openCount > 0 && <> &middot; {openCount} {en.app.openCount}</>}
                 </p>
-              </div>
+              </button>
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <div className="flex gap-1 bg-card/80 rounded-xl p-1 overflow-x-auto">
                   <Tab active={tab === "stats"} onClick={() => setTab("stats")}>{en.tabs.stats}</Tab>
