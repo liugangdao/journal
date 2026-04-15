@@ -105,19 +105,25 @@ const DEFAULT_POLICIES = [
   { category: 'rules', title: 'Close DEX positions before chain-congestion events', content: 'Major airdrop claims, protocol upgrades, or token launches spike gas and oracle lag. Exit proactively.', phase: 'entry' },
 ]
 
+function slugify(name) {
+  return String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
+
 export function seedUserDefaults(userId) {
   const insertPair = db.prepare(
-    'INSERT INTO pairs (user_id, name, asset_class, contract_size, price_precision, spread_cost, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO pairs (user_id, external_id, name, asset_class, contract_size, price_precision, spread_cost, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
   )
   const insertPolicy = db.prepare(
-    'INSERT INTO policies (user_id, category, title, content, sort_order, phase) VALUES (?, ?, ?, ?, ?, ?)'
+    'INSERT INTO policies (user_id, external_id, category, title, content, sort_order, phase) VALUES (?, ?, ?, ?, ?, ?, ?)'
   )
   const tx = db.transaction(() => {
     DEFAULT_PAIRS.forEach((p, i) => {
-      insertPair.run(userId, p.name, p.asset_class, p.contract_size, p.price_precision, p.spread_cost, i)
+      const externalId = `seed-pair-${slugify(p.name)}`
+      insertPair.run(userId, externalId, p.name, p.asset_class, p.contract_size, p.price_precision, p.spread_cost, i)
     })
     DEFAULT_POLICIES.forEach((p, i) => {
-      insertPolicy.run(userId, p.category, p.title, p.content, i, p.phase)
+      const externalId = `seed-policy-${String(i).padStart(2, '0')}`
+      insertPolicy.run(userId, externalId, p.category, p.title, p.content, i, p.phase)
     })
   })
   tx()
