@@ -222,6 +222,15 @@ Use `dangerouslyDisableSandbox: true` on the Bash calls if pnpm needs network.
 
 `fake-indexeddb` is the test harness used in Task 5 for LocalStore tests.
 
+**Version alignment note:** `@vitejs/plugin-react` is installed in `client/` (for Vite dev) and again at repo root (for vitest, Step 3). Both must be the same major version, otherwise the plugin's React refresh integration may conflict across processes. After both installs, run the pin check:
+
+```bash
+cd /home/lz/workspace/journal
+grep -E '"@vitejs/plugin-react"' package.json client/package.json
+```
+
+Both versions should agree on major.minor. If they don't, reinstall the mismatched side pinned to the matching version.
+
 - [ ] **Step 3: Update `vitest.config.ts` at repo root to include client tests.**
 
 ```ts
@@ -273,6 +282,213 @@ git -c user.email="lz@basiscalc.xyz" -c user.name="lz" commit -m "chore: add cli
 Enables .ts / .tsx authoring under client/src. Vitest picks up both
 server (node) and client (jsdom) tests with environmentMatchGlobs.
 Existing .jsx files continue to work unchanged.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+git push
+```
+
+---
+
+## Task 2b: Deterministic `external_id`s for seeded defaults + shared defaults module
+
+**Files:**
+- Modify: `server/db.js` (update `seedUserDefaults` to set `external_id` on every inserted row)
+- Create: `client/src/lib/defaults.ts` (mirror of the server seed data)
+
+**Why this task exists:** `server/db.js::seedUserDefaults` from Plan 1 Task 5 inserts 33 pairs + 18 policies without `external_id` values. Plan 2's migration endpoint uses `INSERT OR IGNORE` keyed on `(user_id, external_id)` to dedupe, so a seeded row (no external_id) would be IGNORE'd against itself but would also let the client push a DUPLICATE row (client-generated UUID). This produces 66 pairs + 36 policies on first sign-in. The fix is to use a deterministic external_id on both sides — `seed-pair-<slug>` and `seed-policy-<index>` — so seeded rows and client-migrated rows match and dedupe correctly. The same defaults module is also used by the client LocalStore in Task 5 to pre-populate an anonymous user's journal so the "add trade" form has pairs to pick from on first visit.
+
+- [ ] **Step 1: Read the current `seedUserDefaults` to understand its layout.**
+
+```bash
+cat /home/lz/workspace/journal/server/db.js | head -160 | tail -130
+```
+
+- [ ] **Step 2: Update `seedUserDefaults` so every insert has an `external_id`.**
+
+Replace the pair insert statement and the policy insert statement. In `server/db.js`, find:
+
+```js
+const insertPair = db.prepare(
+  'INSERT INTO pairs (user_id, name, asset_class, contract_size, price_precision, spread_cost, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
+)
+const insertPolicy = db.prepare(
+  'INSERT INTO policies (user_id, category, title, content, sort_order, phase) VALUES (?, ?, ?, ?, ?, ?)'
+)
+```
+
+Replace with:
+
+```js
+const insertPair = db.prepare(
+  'INSERT INTO pairs (user_id, external_id, name, asset_class, contract_size, price_precision, spread_cost, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+)
+const insertPolicy = db.prepare(
+  'INSERT INTO policies (user_id, external_id, category, title, content, sort_order, phase) VALUES (?, ?, ?, ?, ?, ?, ?)'
+)
+```
+
+And update the transaction body. Find:
+
+```js
+const tx = db.transaction(() => {
+  DEFAULT_PAIRS.forEach((p, i) => {
+    insertPair.run(userId, p.name, p.asset_class, p.contract_size, p.price_precision, p.spread_cost, i)
+  })
+  DEFAULT_POLICIES.forEach((p, i) => {
+    insertPolicy.run(userId, p.category, p.title, p.content, i, p.phase)
+  })
+})
+```
+
+Replace with:
+
+```js
+function slugify(name) {
+  return String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
+
+const tx = db.transaction(() => {
+  DEFAULT_PAIRS.forEach((p, i) => {
+    const externalId = `seed-pair-${slugify(p.name)}`
+    insertPair.run(userId, externalId, p.name, p.asset_class, p.contract_size, p.price_precision, p.spread_cost, i)
+  })
+  DEFAULT_POLICIES.forEach((p, i) => {
+    const externalId = `seed-policy-${String(i).padStart(2, '0')}`
+    insertPolicy.run(userId, externalId, p.category, p.title, p.content, i, p.phase)
+  })
+})
+```
+
+The `slugify` helper must be defined in the module scope of `db.js`, before `seedUserDefaults`. Place it near the top of the file after the imports, or inline inside the transaction as above.
+
+- [ ] **Step 3: Create `client/src/lib/defaults.ts` that mirrors the server seed data and exports the same deterministic `external_id`s.**
+
+```ts
+import type { PairRow, PolicyRow } from '../stores/types'
+
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
+
+const RAW_PAIRS: Array<Omit<PairRow, 'external_id' | 'id'>> = [
+  // Forex (22)
+  { name: 'EUR/USD', asset_class: 'forex', contract_size: 100000, price_precision: 5, spread_cost: 3.5, sort_order: 0 },
+  { name: 'GBP/USD', asset_class: 'forex', contract_size: 100000, price_precision: 5, spread_cost: 4, sort_order: 1 },
+  { name: 'USD/JPY', asset_class: 'forex', contract_size: 100000, price_precision: 3, spread_cost: 3, sort_order: 2 },
+  { name: 'AUD/USD', asset_class: 'forex', contract_size: 100000, price_precision: 5, spread_cost: 3.5, sort_order: 3 },
+  { name: 'NZD/USD', asset_class: 'forex', contract_size: 100000, price_precision: 5, spread_cost: 4.5, sort_order: 4 },
+  { name: 'USD/CAD', asset_class: 'forex', contract_size: 100000, price_precision: 5, spread_cost: 4, sort_order: 5 },
+  { name: 'USD/CHF', asset_class: 'forex', contract_size: 100000, price_precision: 5, spread_cost: 4, sort_order: 6 },
+  { name: 'EUR/GBP', asset_class: 'forex', contract_size: 100000, price_precision: 5, spread_cost: 4.5, sort_order: 7 },
+  { name: 'EUR/JPY', asset_class: 'forex', contract_size: 100000, price_precision: 3, spread_cost: 5, sort_order: 8 },
+  { name: 'GBP/JPY', asset_class: 'forex', contract_size: 100000, price_precision: 3, spread_cost: 6, sort_order: 9 },
+  { name: 'AUD/JPY', asset_class: 'forex', contract_size: 100000, price_precision: 3, spread_cost: 5, sort_order: 10 },
+  { name: 'NZD/JPY', asset_class: 'forex', contract_size: 100000, price_precision: 3, spread_cost: 5, sort_order: 11 },
+  { name: 'CAD/JPY', asset_class: 'forex', contract_size: 100000, price_precision: 3, spread_cost: 5, sort_order: 12 },
+  { name: 'AUD/CAD', asset_class: 'forex', contract_size: 100000, price_precision: 5, spread_cost: 4, sort_order: 13 },
+  { name: 'EUR/AUD', asset_class: 'forex', contract_size: 100000, price_precision: 5, spread_cost: 5, sort_order: 14 },
+  { name: 'EUR/CHF', asset_class: 'forex', contract_size: 100000, price_precision: 5, spread_cost: 5, sort_order: 15 },
+  { name: 'GBP/CHF', asset_class: 'forex', contract_size: 100000, price_precision: 5, spread_cost: 5, sort_order: 16 },
+  { name: 'CHF/JPY', asset_class: 'forex', contract_size: 100000, price_precision: 3, spread_cost: 5, sort_order: 17 },
+  { name: 'EUR/CAD', asset_class: 'forex', contract_size: 100000, price_precision: 5, spread_cost: 5, sort_order: 18 },
+  { name: 'GBP/CAD', asset_class: 'forex', contract_size: 100000, price_precision: 5, spread_cost: 5, sort_order: 19 },
+  { name: 'GBP/AUD', asset_class: 'forex', contract_size: 100000, price_precision: 5, spread_cost: 5, sort_order: 20 },
+  { name: 'AUD/NZD', asset_class: 'forex', contract_size: 100000, price_precision: 5, spread_cost: 4, sort_order: 21 },
+  // Metals (2)
+  { name: 'XAU/USD', asset_class: 'metals', contract_size: 100, price_precision: 2, spread_cost: 12, sort_order: 22 },
+  { name: 'XAG/USD', asset_class: 'metals', contract_size: 5000, price_precision: 3, spread_cost: 10, sort_order: 23 },
+  // Energy (3)
+  { name: 'USOil', asset_class: 'energy', contract_size: 1000, price_precision: 2, spread_cost: 5, sort_order: 24 },
+  { name: 'UKOil', asset_class: 'energy', contract_size: 1000, price_precision: 2, spread_cost: 6, sort_order: 25 },
+  { name: 'NGAS', asset_class: 'energy', contract_size: 10000, price_precision: 3, spread_cost: 8, sort_order: 26 },
+  // Crypto perp (6)
+  { name: 'BTC/USDT', asset_class: 'crypto_perp', contract_size: 1, price_precision: 2, spread_cost: 0, sort_order: 27 },
+  { name: 'ETH/USDT', asset_class: 'crypto_perp', contract_size: 1, price_precision: 2, spread_cost: 0, sort_order: 28 },
+  { name: 'SOL/USDT', asset_class: 'crypto_perp', contract_size: 1, price_precision: 3, spread_cost: 0, sort_order: 29 },
+  { name: 'AVAX/USDT', asset_class: 'crypto_perp', contract_size: 1, price_precision: 3, spread_cost: 0, sort_order: 30 },
+  { name: 'ARB/USDT', asset_class: 'crypto_perp', contract_size: 1, price_precision: 4, spread_cost: 0, sort_order: 31 },
+  { name: 'DOGE/USDT', asset_class: 'crypto_perp', contract_size: 1, price_precision: 5, spread_cost: 0, sort_order: 32 },
+]
+
+const RAW_POLICIES: Array<Omit<PolicyRow, 'external_id' | 'id'>> = [
+  { category: 'rules', title: 'Daily loss <= 2% of account equity', content: 'When cumulative daily loss reaches 2%, stop trading immediately to avoid emotional compounding.', phase: 'both', sort_order: 0, is_active: 1 },
+  { category: 'rules', title: 'Stop after 3 consecutive losses', content: 'Three losses in a row signals strategy-market mismatch; continuing raises loss probability.', phase: 'both', sort_order: 1, is_active: 1 },
+  { category: 'rules', title: 'No trades 30 min before or after high-impact data', content: 'Around NFP, CPI, and rate decisions, spreads widen and moves are erratic.', phase: 'entry', sort_order: 2, is_active: 1 },
+  { category: 'rules', title: 'Every trade has a stop-loss', content: 'The stop is your capital guarantee. No stop means unbounded risk. Always place it when entering.', phase: 'entry', sort_order: 3, is_active: 1 },
+  { category: 'rules', title: 'No revenge trading', content: 'Doubling down to win back losses is the single most common cause of account blow-ups. Step away.', phase: 'entry', sort_order: 4, is_active: 1 },
+  { category: 'strategy', title: 'Wait for pullback confirmation in trends', content: 'Chasing tops and bottoms in trends burns capital. Wait for retracement to support or resistance.', phase: 'entry', sort_order: 5, is_active: 1 },
+  { category: 'strategy', title: 'Require candle close to confirm breakouts', content: 'False breakouts are rampant. Wait for close above/below the level on your chosen timeframe.', phase: 'entry', sort_order: 6, is_active: 1 },
+  { category: 'strategy', title: 'Halve size on counter-trend trades', content: 'Counter-trend setups have lower win rates. Reduce size so an incorrect read stays survivable.', phase: 'entry', sort_order: 7, is_active: 1 },
+  { category: 'strategy', title: 'Require alignment across two timeframes', content: 'At least two timeframes must agree on direction before entering. Example: H4 + H1 both long.', phase: 'entry', sort_order: 8, is_active: 1 },
+  { category: 'strategy', title: 'Write entry thesis and target before placing the order', content: 'Documenting why, where to exit, and where to stop forces clarity and prevents gut-feel entries.', phase: 'entry', sort_order: 9, is_active: 1 },
+  { category: 'risk', title: 'Single-trade risk <= 1% of equity', content: 'Capping risk per trade means ten consecutive losses leaves 90%+ of capital intact.', phase: 'entry', sort_order: 10, is_active: 1 },
+  { category: 'risk', title: 'Max 3 open positions in same direction', content: 'Concentrated same-direction exposure amplifies drawdowns on reversal. Diversify.', phase: 'entry', sort_order: 11, is_active: 1 },
+  { category: 'risk', title: 'Skip trades with reward-to-risk below 1.5', content: 'Take only setups where potential profit is at least 1.5x the planned loss. Long term this is what pays.', phase: 'entry', sort_order: 12, is_active: 1 },
+  { category: 'risk', title: 'Move stop to breakeven after 1R profit', content: 'Once a trade is in 1R profit, trail the stop to entry. A winner never becomes a loser.', phase: 'exit', sort_order: 13, is_active: 1 },
+  { category: 'risk', title: 'Weekly loss <= 5% of equity', content: 'Cumulative weekly drawdown cap prevents continued bleeding in adverse market phases.', phase: 'both', sort_order: 14, is_active: 1 },
+  { category: 'rules', title: 'Check funding rate before holding overnight', content: 'Negative funding against your direction can exceed 100% annualized. Read the rate before every overnight hold.', phase: 'entry', sort_order: 15, is_active: 1 },
+  { category: 'rules', title: 'No trading in first 5 minutes after listing', content: 'New listings see extreme volatility, thin liquidity, and frequent wicks that liquidate even small-size positions.', phase: 'entry', sort_order: 16, is_active: 1 },
+  { category: 'rules', title: 'Close DEX positions before chain-congestion events', content: 'Major airdrop claims, protocol upgrades, or token launches spike gas and oracle lag. Exit proactively.', phase: 'entry', sort_order: 17, is_active: 1 },
+]
+
+export const DEFAULT_PAIRS: PairRow[] = RAW_PAIRS.map((p) => ({
+  ...p,
+  external_id: `seed-pair-${slugify(p.name)}`,
+}))
+
+export const DEFAULT_POLICIES: PolicyRow[] = RAW_POLICIES.map((p, i) => ({
+  ...p,
+  external_id: `seed-policy-${String(i).padStart(2, '0')}`,
+}))
+```
+
+- [ ] **Step 4: Regenerate the dev DB so the new seed runs on fresh data.**
+
+```bash
+cd /home/lz/workspace/journal
+rm -f data/journal.db data/journal.db-shm data/journal.db-wal
+node -e "import('./server/db.js').then(m => { const db = m.default; const r = db.prepare('INSERT INTO users (email) VALUES (?)').run('seed-check@example.com'); m.seedUserDefaults(r.lastInsertRowid); const p = db.prepare(\"SELECT external_id, name FROM pairs WHERE user_id = ? ORDER BY sort_order LIMIT 3\").all(r.lastInsertRowid); console.log('sample pairs:', p); const pols = db.prepare(\"SELECT external_id, title FROM policies WHERE user_id = ? ORDER BY sort_order LIMIT 3\").all(r.lastInsertRowid); console.log('sample policies:', pols); })"
+```
+
+Expected:
+```
+sample pairs: [
+  { external_id: 'seed-pair-eur-usd', name: 'EUR/USD' },
+  { external_id: 'seed-pair-gbp-usd', name: 'GBP/USD' },
+  { external_id: 'seed-pair-usd-jpy', name: 'USD/JPY' }
+]
+sample policies: [
+  { external_id: 'seed-policy-00', title: 'Daily loss <= 2% ...' },
+  { external_id: 'seed-policy-01', title: 'Stop after 3 ...' },
+  { external_id: 'seed-policy-02', title: 'No trades 30 min ...' }
+]
+```
+
+Confirms the seed writes stable ids. Clean up the dev DB again:
+
+```bash
+rm -f data/journal.db data/journal.db-shm data/journal.db-wal
+```
+
+- [ ] **Step 5: Run the full test suite to confirm nothing broke.**
+
+```bash
+pnpm test 2>&1 | tail -10
+```
+
+Expected: 13 Plan 1 tests pass (magic-link test already verifies seed counts: 33 pairs + 18 policies). If the Plan 1 magic-link test asserts that seed returns rows WITHOUT external_id and therefore fails, update it to verify `external_id IS NOT NULL` on sampled rows.
+
+- [ ] **Step 6: Commit.**
+
+```bash
+git add -A
+git -c user.email="lz@basiscalc.xyz" -c user.name="lz" commit -m "feat: deterministic external_ids for seeded defaults
+
+Server seedUserDefaults now writes seed-pair-<slug> / seed-policy-<NN>
+so that the Plan 2 migration endpoint can dedupe seeded rows against
+a returning anonymous user's pushed defaults without duplicates.
+client/src/lib/defaults.ts mirrors the data and is consumed by
+LocalStore's init seed in Task 5.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 git push
@@ -850,6 +1066,19 @@ describe('LocalStore', () => {
     expect(trades.map((t) => t.external_id).sort()).toEqual(['ext-1', 'ext-2'])
   })
 
+  it('listPairs auto-seeds 33 defaults on first call', async () => {
+    const pairs = await store.listPairs()
+    expect(pairs).toHaveLength(33)
+    expect(pairs.find((p) => p.name === 'EUR/USD')?.external_id).toBe('seed-pair-eur-usd')
+    expect(pairs.find((p) => p.name === 'BTC/USDT')?.external_id).toBe('seed-pair-btc-usdt')
+  })
+
+  it('listPolicies auto-seeds 18 defaults on first call', async () => {
+    const policies = await store.listPolicies()
+    expect(policies).toHaveLength(18)
+    expect(policies[0].external_id).toBe('seed-policy-00')
+  })
+
   it('deleteTrade removes by external_id', async () => {
     await store.addTrade(mkTrade('keep'))
     await store.addTrade(mkTrade('remove'))
@@ -904,6 +1133,7 @@ import type {
   MigratePayload,
 } from './types'
 import type { JournalStore } from './JournalStore'
+import { DEFAULT_PAIRS, DEFAULT_POLICIES } from '../lib/defaults'
 
 class JournalDB extends Dexie {
   trades!: Table<TradeRow, string>
@@ -928,9 +1158,30 @@ class JournalDB extends Dexie {
 
 export class LocalStore implements JournalStore {
   private db: JournalDB
+  private initPromise: Promise<void> | null = null
 
   constructor(dbName = 'journalLocal') {
     this.db = new JournalDB(dbName)
+  }
+
+  /**
+   * Lazy one-time seed of default pairs and policies on first use.
+   * Called automatically by every public method; idempotent.
+   * Uses the same deterministic external_ids as the server seed so
+   * the migrate endpoint's INSERT OR IGNORE dedupes correctly.
+   */
+  private async ensureSeeded(): Promise<void> {
+    if (this.initPromise) return this.initPromise
+    this.initPromise = (async () => {
+      const pairCount = await this.db.pairs.count()
+      const policyCount = await this.db.policies.count()
+      if (pairCount > 0 || policyCount > 0) return
+      await this.db.transaction('rw', this.db.pairs, this.db.policies, async () => {
+        await this.db.pairs.bulkPut(DEFAULT_PAIRS)
+        await this.db.policies.bulkPut(DEFAULT_POLICIES)
+      })
+    })()
+    return this.initPromise
   }
 
   async listTrades(): Promise<TradeRow[]> {
@@ -981,6 +1232,7 @@ export class LocalStore implements JournalStore {
   }
 
   async listPolicies(): Promise<PolicyRow[]> {
+    await this.ensureSeeded()
     return this.db.policies.orderBy('sort_order').toArray()
   }
 
@@ -994,6 +1246,7 @@ export class LocalStore implements JournalStore {
   }
 
   async listPairs(): Promise<PairRow[]> {
+    await this.ensureSeeded()
     return this.db.pairs.orderBy('sort_order').toArray()
   }
 
@@ -2091,6 +2344,194 @@ git push
 
 ---
 
+## Task 10b: `by-external` endpoints for notes, policies, and violations
+
+**Files:**
+- Modify: `server/routes/notes.js` (weekly notes)
+- Modify: `server/routes/monthly-notes.js`
+- Modify: `server/routes/policies.js`
+- Modify: `server/routes/violations.js`
+
+**Why:** `ApiStore` calls `GET/PUT/DELETE /api/<resource>/by-external/:external_id` for all CRUD; without these endpoints an authenticated user cannot upsert or delete notes/policies after migration, and the app effectively becomes read-only for those resources. This task adds the minimum endpoints the ApiStore needs.
+
+- [ ] **Step 1: Add `by-external` endpoints to `server/routes/notes.js`.**
+
+Read the file first:
+
+```bash
+cat /home/lz/workspace/journal/server/routes/notes.js
+```
+
+Append these handlers to the router (after existing routes, before `export default router`):
+
+```js
+// GET /api/notes/by-external/:external_id
+router.get('/by-external/:external_id', (req, res) => {
+  try {
+    const row = db.prepare(
+      'SELECT * FROM weekly_notes WHERE user_id = ? AND external_id = ?'
+    ).get(req.userId, req.params.external_id)
+    if (!row) return res.status(404).json({ error: 'Note not found' })
+    res.json(row)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// PUT /api/notes/by-external/:external_id (upsert semantics)
+router.put('/by-external/:external_id', (req, res) => {
+  try {
+    const { week, lesson, plan } = req.body ?? {}
+    if (!week) return res.status(400).json({ error: 'week is required' })
+    const existing = db.prepare(
+      'SELECT id FROM weekly_notes WHERE user_id = ? AND external_id = ?'
+    ).get(req.userId, req.params.external_id)
+    if (existing) {
+      db.prepare(
+        'UPDATE weekly_notes SET week = ?, lesson = ?, plan = ? WHERE id = ?'
+      ).run(week, lesson ?? null, plan ?? null, existing.id)
+    } else {
+      db.prepare(
+        'INSERT INTO weekly_notes (user_id, external_id, week, lesson, plan) VALUES (?, ?, ?, ?, ?)'
+      ).run(req.userId, req.params.external_id, week, lesson ?? null, plan ?? null)
+    }
+    const row = db.prepare(
+      'SELECT * FROM weekly_notes WHERE user_id = ? AND external_id = ?'
+    ).get(req.userId, req.params.external_id)
+    res.json(row)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// DELETE /api/notes/by-external/:external_id
+router.delete('/by-external/:external_id', (req, res) => {
+  try {
+    const info = db.prepare(
+      'DELETE FROM weekly_notes WHERE user_id = ? AND external_id = ?'
+    ).run(req.userId, req.params.external_id)
+    if (info.changes === 0) return res.status(404).json({ error: 'Note not found' })
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+```
+
+**Also**: update the existing `POST /api/notes` (create) handler to accept and persist `external_id`. Find the INSERT statement and add `external_id` to the column list and a corresponding `req.body.external_id` value.
+
+- [ ] **Step 2: Apply the same pattern to `server/routes/monthly-notes.js`.**
+
+Substitute `weekly_notes` → `monthly_notes` and `week` field → `month` field. Otherwise identical to Step 1.
+
+- [ ] **Step 3: Apply to `server/routes/policies.js`.**
+
+Add `by-external` GET/PUT/DELETE. PUT uses upsert semantics with columns `(category, title, content, sort_order, is_active, phase)`:
+
+```js
+// GET /api/policies/by-external/:external_id
+router.get('/by-external/:external_id', (req, res) => {
+  try {
+    const row = db.prepare('SELECT * FROM policies WHERE user_id = ? AND external_id = ?')
+      .get(req.userId, req.params.external_id)
+    if (!row) return res.status(404).json({ error: 'Policy not found' })
+    res.json(row)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+router.put('/by-external/:external_id', (req, res) => {
+  try {
+    const { category, title, content, sort_order, is_active, phase } = req.body ?? {}
+    if (!category || !title || !content) {
+      return res.status(400).json({ error: 'category, title, and content are required' })
+    }
+    const existing = db.prepare(
+      'SELECT id FROM policies WHERE user_id = ? AND external_id = ?'
+    ).get(req.userId, req.params.external_id)
+    if (existing) {
+      db.prepare(`
+        UPDATE policies SET category = ?, title = ?, content = ?,
+          sort_order = ?, is_active = ?, phase = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(category, title, content, sort_order ?? 0, is_active ?? 1, phase ?? 'both', existing.id)
+    } else {
+      db.prepare(`
+        INSERT INTO policies (user_id, external_id, category, title, content, sort_order, is_active, phase)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        req.userId, req.params.external_id, category, title, content,
+        sort_order ?? 0, is_active ?? 1, phase ?? 'both'
+      )
+    }
+    const row = db.prepare('SELECT * FROM policies WHERE user_id = ? AND external_id = ?')
+      .get(req.userId, req.params.external_id)
+    res.json(row)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+router.delete('/by-external/:external_id', (req, res) => {
+  try {
+    const info = db.prepare('DELETE FROM policies WHERE user_id = ? AND external_id = ?')
+      .run(req.userId, req.params.external_id)
+    if (info.changes === 0) return res.status(404).json({ error: 'Policy not found' })
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+```
+
+Also add `external_id` to the existing `POST /api/policies` INSERT.
+
+- [ ] **Step 4: Violations — the `by-external` endpoints for violations already exist in Task 9 (under `/api/trades/by-external/:trade_external_id/violations`).** Double-check `server/routes/trades.js` contains both the GET and PUT handlers for violations (added in Task 9 Step 2). If missing, add them.
+
+- [ ] **Step 5: Smoke-check the server boots after changes.**
+
+```bash
+cd /home/lz/workspace/journal
+pkill -9 -f "tsx.*index.js" 2>/dev/null; sleep 1
+rm -f data/journal.db*
+RESEND_API_KEY=dummy TURNSTILE_SECRET=dummy SESSION_SECRET=test NODE_ENV=test \
+  pnpm run dev:server > /tmp/plan2-task10b.log 2>&1 &
+SP=$!
+sleep 4
+curl -s --noproxy '*' http://localhost:3001/api/health
+kill $SP 2>/dev/null
+wait $SP 2>/dev/null
+tail -5 /tmp/plan2-task10b.log
+```
+
+Expected: health ok, no import errors on any of the modified routes.
+
+- [ ] **Step 6: Run the test suite.**
+
+```bash
+pnpm test 2>&1 | tail -8
+```
+
+Expected: 31 tests still pass (no new tests added in this task; the existing migration test exercises the notes/policies code paths for bulk insert, which is the only path we care about for Plan 2).
+
+- [ ] **Step 7: Commit.**
+
+```bash
+git add -A
+git -c user.email="lz@basiscalc.xyz" -c user.name="lz" commit -m "feat: by-external endpoints for notes, monthly-notes, policies
+
+Authenticated users can now upsert and delete notes/policies via
+stable client UUIDs, closing the gap between ApiStore and the
+legacy id-based routes. Violations already reachable via
+/api/trades/by-external/:id/violations (added in Task 9).
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+git push
+```
+
+---
+
 ## Task 11: Client migration flow + App.jsx wiring
 
 **Files:**
@@ -2098,6 +2539,17 @@ git push
 - Modify: `client/src/App.jsx`
 
 The migration trigger runs once, on the first render after sign-in, when `?just_signed_in=1` is present in the URL.
+
+- [ ] **Step 0: Enumerate every `api.*` call site in App.jsx** so the storeAdapter refactor has a clear mapping.
+
+```bash
+cd /home/lz/workspace/journal
+grep -n "api\." client/src/App.jsx | sort -t: -k2 -n
+```
+
+Record every unique method — expect matches like `api.getMe()`, `api.listTrades()`, `api.createTrade(...)`, `api.updateTrade(...)`, `api.deleteTrade(...)`, `api.listNotes()`, `api.createNote(...)`, etc. The set will become the method list on `storeAdapter`. Any method on `api` that has no equivalent in `JournalStore` (e.g. `getMe`, `register`, `login`, quota-related) stays on a small residual `useApi` shim for auth/session concerns only. The rest move to `storeAdapter`.
+
+Write the mapping at the top of the commit message so the next task (Task 12 smoke test) can verify each call site was migrated.
 
 - [ ] **Step 1: Create `client/src/hooks/useMigrationTrigger.ts`.**
 
@@ -2403,8 +2855,12 @@ git push --tags
 - `getLocalStore()` / `getApiStore()` from Task 7 consumed by Task 11's `useMigrationTrigger`
 - `/api/migrate` POST body shape matches `MigratePayload` definition in Task 4 and server parsing in Task 8
 
-**Gaps:**
-- Plan 2 does NOT update `routes/notes.js`, `routes/monthly-notes.js`, `routes/policies.js`, `routes/violations.js` for the new `external_id` columns beyond what migration needs. The `ApiStore` calls `by-external` endpoints on these routes but the endpoints don't exist yet. **This is a real gap for authenticated users**: after Plan 2, the app works anonymously (LocalStore) and can migrate on sign-in (via the dedicated /api/migrate endpoint), but authenticated users who then add new notes/policies via `ApiStore.upsertWeeklyNote` etc. will get 404s because the server doesn't have those endpoints. Plan 3 adds them. Until then, authenticated users are effectively read-only after migration for notes/policies — a known limitation for the Plan 2 checkpoint.
+**Gaps (closed):**
+- `by-external` endpoints for notes, monthly-notes, policies, and trade violations are added in Task 10b. Plan 2 ships a complete authenticated CRUD surface for anonymous + sync + authenticated flows.
+- `server/db.js::seedUserDefaults` writes deterministic `external_id`s in Task 2b; the client's LocalStore seeds matching IDs in Task 5, so migration dedupes cleanly with no 66-pair / 36-policy duplicates on first sign-in.
+
+**Updated test count after Task 2b changes:**
+- Task 5 LocalStore gains 2 additional test cases (pairs auto-seed, policies auto-seed), so Plan 2 adds 8 calc + 6 LocalStore + 3 ApiStore + 3 migrate = **20 new tests**. Total after Plan 2: **33 tests** (13 from Plan 1 + 20).
 
 ---
 
