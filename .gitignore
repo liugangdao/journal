@@ -9,3 +9,6 @@ data/
 .DS_Store
 /server/public/assets/
 .superpowers/
+
+# Plan 4 — production env vars (real secrets)
+.env.production
