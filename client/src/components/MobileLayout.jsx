@@ -14,7 +14,7 @@ export default function MobileLayout({
   tab, setTab, children,
   // Sheet props
   showForm, formMode, formInitial, onNewTrade, onFormSubmit, onFormCancel,
-  pairs, policies, editViolations, editing, closingId,
+  pairs, pairsByName, policies, editViolations, editing, closingId,
 }) {
   const sheetTitle = formMode === 'close' ? '平仓记录' : formMode === 'edit' ? '编辑交易' : '记录交易'
   const headerTitle = TABS.find(t => t.key === tab)?.title || '交易日志'
@@ -85,6 +85,7 @@ export default function MobileLayout({
               editing={!!editing}
               mode={formMode}
               pairs={pairs}
+              pairsByName={pairsByName}
               policies={policies}
               initialViolations={editing ? editViolations : []}
               onSubmit={onFormSubmit}

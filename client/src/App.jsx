@@ -109,12 +109,8 @@ function AppContent() {
   // Derived data
   const openTrades = useMemo(() => allTrades.filter(t => t.status === 'open'), [allTrades])
   const closedTrades = useMemo(() => allTrades.filter(t => t.status === 'closed'), [allTrades])
-  const spreadCostMap = useMemo(() => {
-    const map = {}
-    pairs.forEach(p => { map[p.name] = p.spread_cost })
-    return map
-  }, [pairs])
   const pairNames = useMemo(() => pairs.map(p => p.name), [pairs])
+  const pairsByName = useMemo(() => new Map(pairs.map((p) => [p.name, p])), [pairs])
 
   // Trade CRUD
   const handleAddTrade = useCallback(async (form) => {
@@ -334,15 +330,15 @@ function AppContent() {
           <PsychologyPanel
             trades={allTrades}
             pairs={pairNames}
-            spreadCostMap={spreadCostMap}
+            pairsByName={pairsByName}
             onAddMissed={handleAddMissed}
             onDeleteTrade={confirmDeleteTrade}
           />
           <OpenPositions openTrades={openTrades} onClose={handleCloseTrade} onDelete={confirmDeleteTrade} />
-          <TradeTable trades={pagedTrades.filter(t => t.status === 'closed')} onEdit={handleEditTrade} onDelete={confirmDeleteTrade} spreadCostMap={spreadCostMap} pagination={tradePagination} onPageChange={handlePageChange} />
+          <TradeTable trades={pagedTrades.filter(t => t.status === 'closed')} onEdit={handleEditTrade} onDelete={confirmDeleteTrade} pairsByName={pairsByName} pagination={tradePagination} onPageChange={handlePageChange} />
         </div>
       )
-      case 'stats': return <Dashboard trades={closedTrades} spreadCostMap={spreadCostMap} theme={theme} />
+      case 'stats': return <Dashboard trades={closedTrades} pairs={pairs} theme={theme} />
       case 'notes': return (
         <NotesTab
           notes={notes} monthlyNotes={monthlyNotes}
@@ -368,7 +364,7 @@ function AppContent() {
       showForm={showForm} formMode={formMode} formInitial={formInitial}
       onNewTrade={handleNewTrade} onFormSubmit={closingId ? handleCloseSubmit : handleAddTrade}
       onFormCancel={handleCancelForm}
-      pairs={pairNames} policies={policies} editViolations={editViolations}
+      pairs={pairNames} pairsByName={pairsByName} policies={policies} editViolations={editViolations}
       editing={editing} closingId={closingId}
       mobileTabContent={mobileTabContent}
       overlays={
@@ -399,7 +395,7 @@ function AppContent() {
             <PsychologyPanel
               trades={allTrades}
               pairs={pairNames}
-              spreadCostMap={spreadCostMap}
+              pairsByName={pairsByName}
               onAddMissed={handleAddMissed}
               onDeleteTrade={confirmDeleteTrade}
             />
@@ -420,16 +416,17 @@ function AppContent() {
                 editing={!!editing}
                 mode={formMode}
                 pairs={pairNames}
+                pairsByName={pairsByName}
                 policies={policies}
                 initialViolations={editing ? editViolations : []}
                 onSubmit={closingId ? handleCloseSubmit : handleAddTrade}
                 onCancel={handleCancelForm}
               />
             )}
-            <TradeTable trades={pagedTrades.filter(t => t.status === 'closed')} onEdit={handleEditTrade} onDelete={confirmDeleteTrade} spreadCostMap={spreadCostMap} pagination={tradePagination} onPageChange={handlePageChange} />
+            <TradeTable trades={pagedTrades.filter(t => t.status === 'closed')} onEdit={handleEditTrade} onDelete={confirmDeleteTrade} pairsByName={pairsByName} pagination={tradePagination} onPageChange={handlePageChange} />
           </div>
         )}
-        {tab === "stats" && <Dashboard trades={closedTrades} spreadCostMap={spreadCostMap} theme={theme} />}
+        {tab === "stats" && <Dashboard trades={closedTrades} pairs={pairs} theme={theme} />}
         {tab === "weekly" && <WeeklyNotes notes={notes} onAdd={handleAddNote} onDelete={confirmDeleteNote} />}
         {tab === "monthly" && <MonthlyNotes notes={monthlyNotes} onAdd={handleAddMonthlyNote} onDelete={confirmDeleteMonthlyNote} />}
         {tab === "policy" && <Policies />}

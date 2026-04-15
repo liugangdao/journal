@@ -18,7 +18,7 @@ export default function Layout({
   tab, setTab, tradeCount, openCount, theme, onToggleTheme, user, signInSlot, onLogout, children,
   // Mobile-specific props
   showForm, formMode, formInitial, onNewTrade, onFormSubmit, onFormCancel,
-  pairs, policies, editViolations, editing, closingId,
+  pairs, pairsByName, policies, editViolations, editing, closingId,
   // Mobile tab content
   mobileTabContent,
   // Global overlays rendered outside responsive containers
@@ -32,7 +32,7 @@ export default function Layout({
           tab={tab} setTab={setTab}
           showForm={showForm} formMode={formMode} formInitial={formInitial}
           onNewTrade={onNewTrade} onFormSubmit={onFormSubmit} onFormCancel={onFormCancel}
-          pairs={pairs} policies={policies} editViolations={editViolations}
+          pairs={pairs} pairsByName={pairsByName} policies={policies} editViolations={editViolations}
           editing={editing} closingId={closingId}
         >
           {mobileTabContent}

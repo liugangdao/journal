@@ -1,49 +1,40 @@
 import { en } from '../i18n/en'
 
-export const PAIRS: string[] = [
-  'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'NZD/USD', 'USD/CAD',
-  'USD/CHF', 'EUR/GBP', 'EUR/JPY', 'GBP/JPY', 'AUD/JPY', 'NZD/JPY',
-  'CAD/JPY', 'AUD/CAD', 'EUR/AUD',
-  'XAU/USD', 'XAG/USD',
-  'USOil', 'UKOil', 'NGAS',
-  'BTC/USDT', 'ETH/USDT', 'SOL/USDT',
-]
-
 export const DIRECTIONS: Array<{ value: 'long' | 'short'; label: string }> = [
   { value: 'long', label: en.trade.long },
   { value: 'short', label: en.trade.short },
 ]
 
-export const STRATEGIES: string[] = [
-  en.strategy.trend,
-  en.strategy.pullback,
-  en.strategy.breakout,
-  en.strategy.range,
-  en.strategy.reversal,
-  en.strategy.news,
-  en.strategy.scalp,
-  en.strategy.other,
+export const STRATEGIES: Array<{ value: string; label: string }> = [
+  { value: 'trend', label: en.strategy.trend },
+  { value: 'pullback', label: en.strategy.pullback },
+  { value: 'breakout', label: en.strategy.breakout },
+  { value: 'range', label: en.strategy.range },
+  { value: 'reversal', label: en.strategy.reversal },
+  { value: 'news', label: en.strategy.news },
+  { value: 'scalp', label: en.strategy.scalp },
+  { value: 'other', label: en.strategy.other },
 ]
 
 export const TIMEFRAMES: string[] = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1', 'W1', 'MN']
 
-export const SCORES: string[] = [
-  `A - ${en.score.A}`,
-  `B - ${en.score.B}`,
-  `C - ${en.score.C}`,
-  `D - ${en.score.D}`,
+export const SCORES: Array<{ value: string; label: string; desc: string }> = [
+  { value: 'A', label: `A — ${en.score.A}`, desc: en.score.ADesc },
+  { value: 'B', label: `B — ${en.score.B}`, desc: en.score.BDesc },
+  { value: 'C', label: `C — ${en.score.C}`, desc: en.score.CDesc },
+  { value: 'D', label: `D — ${en.score.D}`, desc: en.score.DDesc },
 ]
 
-export const EMOTIONS: string[] = [
-  en.emotion.calm,
-  en.emotion.confident,
-  en.emotion.anxious,
-  en.emotion.fearful,
-  en.emotion.greedy,
-  en.emotion.fomo,
-  en.emotion.bored,
-  en.emotion.tilted,
-  en.emotion.hopeful,
+export const EMOTIONS: Array<{ value: string; label: string }> = [
+  { value: 'calm', label: en.emotion.calm },
+  { value: 'confident', label: en.emotion.confident },
+  { value: 'anxious', label: en.emotion.anxious },
+  { value: 'fearful', label: en.emotion.fearful },
+  { value: 'greedy', label: en.emotion.greedy },
+  { value: 'fomo', label: en.emotion.fomo },
+  { value: 'bored', label: en.emotion.bored },
+  { value: 'tilted', label: en.emotion.tilted },
+  { value: 'hopeful', label: en.emotion.hopeful },
 ]
 
 export const WEEKDAYS: string[] = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -60,15 +51,6 @@ export const PHASE_LABELS = {
   exit: en.policy.phases.exit,
   both: en.policy.phases.both,
 } as const
-
-export const SPREAD_COST: Record<string, number> = {
-  'EUR/USD': 3.5, 'GBP/USD': 4, 'USD/JPY': 3, 'AUD/USD': 3.5,
-  'NZD/USD': 4.5, 'USD/CAD': 4, 'USD/CHF': 4, 'EUR/GBP': 4.5,
-  'EUR/JPY': 5, 'GBP/JPY': 6, 'AUD/JPY': 5, 'NZD/JPY': 5,
-  'CAD/JPY': 5, 'AUD/CAD': 4, 'EUR/AUD': 5,
-  'XAU/USD': 12, 'XAG/USD': 10, 'USOil': 5, 'UKOil': 6,
-  'NGAS': 8, 'BTC/USDT': 0, 'ETH/USDT': 0, 'SOL/USDT': 0,
-}
 
 export const LIVERMORE_QUOTES: string[] = [
   'The market is never wrong – opinions often are.',
