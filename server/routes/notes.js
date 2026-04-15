@@ -16,10 +16,12 @@ router.get('/', (req, res) => {
 // POST /api/notes - create note
 router.post('/', (req, res) => {
   try {
-    const { week, lesson, plan } = req.body
+    const { external_id, week, lesson, plan } = req.body
     if (!week) return res.status(400).json({ error: 'Week is required' })
-    const stmt = db.prepare('INSERT INTO weekly_notes (user_id, week, lesson, plan) VALUES (?, ?, ?, ?)')
-    const result = stmt.run(req.userId, week, lesson || null, plan || null)
+    const stmt = db.prepare(
+      'INSERT INTO weekly_notes (user_id, external_id, week, lesson, plan) VALUES (?, ?, ?, ?, ?)'
+    )
+    const result = stmt.run(req.userId, external_id ?? null, week, lesson || null, plan || null)
     const note = db.prepare('SELECT * FROM weekly_notes WHERE id = ?').get(result.lastInsertRowid)
     res.status(201).json(note)
   } catch (err) {
@@ -33,6 +35,54 @@ router.delete('/:id', (req, res) => {
     const existing = db.prepare('SELECT * FROM weekly_notes WHERE id = ? AND user_id = ?').get(req.params.id, req.userId)
     if (!existing) return res.status(404).json({ error: 'Note not found' })
     db.prepare('DELETE FROM weekly_notes WHERE id = ? AND user_id = ?').run(req.params.id, req.userId)
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/notes/by-external/:external_id
+router.get('/by-external/:external_id', (req, res) => {
+  try {
+    const row = db.prepare('SELECT * FROM weekly_notes WHERE user_id = ? AND external_id = ?')
+      .get(req.userId, req.params.external_id)
+    if (!row) return res.status(404).json({ error: 'Note not found' })
+    res.json(row)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// PUT /api/notes/by-external/:external_id — upsert
+router.put('/by-external/:external_id', (req, res) => {
+  try {
+    const { week, lesson, plan } = req.body ?? {}
+    if (!week) return res.status(400).json({ error: 'Week is required' })
+    const existing = db.prepare('SELECT id FROM weekly_notes WHERE user_id = ? AND external_id = ?')
+      .get(req.userId, req.params.external_id)
+    if (existing) {
+      db.prepare(
+        'UPDATE weekly_notes SET week = ?, lesson = ?, plan = ? WHERE id = ?'
+      ).run(week, lesson ?? null, plan ?? null, existing.id)
+    } else {
+      db.prepare(
+        'INSERT INTO weekly_notes (user_id, external_id, week, lesson, plan) VALUES (?, ?, ?, ?, ?)'
+      ).run(req.userId, req.params.external_id, week, lesson ?? null, plan ?? null)
+    }
+    const row = db.prepare('SELECT * FROM weekly_notes WHERE user_id = ? AND external_id = ?')
+      .get(req.userId, req.params.external_id)
+    res.json(row)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// DELETE /api/notes/by-external/:external_id
+router.delete('/by-external/:external_id', (req, res) => {
+  try {
+    const info = db.prepare('DELETE FROM weekly_notes WHERE user_id = ? AND external_id = ?')
+      .run(req.userId, req.params.external_id)
+    if (info.changes === 0) return res.status(404).json({ error: 'Note not found' })
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })

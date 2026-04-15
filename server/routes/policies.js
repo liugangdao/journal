@@ -30,15 +30,74 @@ router.get('/', (req, res) => {
 router.post('/', (req, res) => {
   try {
     const userId = req.userId
-    const { category, title, content, sort_order, phase } = req.body
+    const { external_id, category, title, content, sort_order, phase } = req.body
     if (!category || !title || !content) {
-      return res.status(400).json({ error: '分类、标题和内容为必填项' })
+      return res.status(400).json({ error: 'Category, title, and content are required' })
     }
     const result = db.prepare(
-      'INSERT INTO policies (user_id, category, title, content, sort_order, phase) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(userId, category, title.trim(), content.trim(), sort_order ?? 0, phase ?? 'both')
+      'INSERT INTO policies (user_id, external_id, category, title, content, sort_order, phase) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(
+      userId, external_id ?? null, category, title.trim(), content.trim(),
+      sort_order ?? 0, phase ?? 'both'
+    )
     const policy = db.prepare('SELECT * FROM policies WHERE id = ?').get(result.lastInsertRowid)
     res.status(201).json(policy)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/policies/by-external/:external_id
+router.get('/by-external/:external_id', (req, res) => {
+  try {
+    const row = db.prepare('SELECT * FROM policies WHERE user_id = ? AND external_id = ?')
+      .get(req.userId, req.params.external_id)
+    if (!row) return res.status(404).json({ error: 'Policy not found' })
+    res.json(row)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// PUT /api/policies/by-external/:external_id — upsert
+router.put('/by-external/:external_id', (req, res) => {
+  try {
+    const { category, title, content, sort_order, is_active, phase } = req.body ?? {}
+    if (!category || !title || !content) {
+      return res.status(400).json({ error: 'Category, title, and content are required' })
+    }
+    const existing = db.prepare('SELECT id FROM policies WHERE user_id = ? AND external_id = ?')
+      .get(req.userId, req.params.external_id)
+    if (existing) {
+      db.prepare(`
+        UPDATE policies SET category = ?, title = ?, content = ?,
+          sort_order = ?, is_active = ?, phase = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(category, title, content, sort_order ?? 0, is_active ?? 1, phase ?? 'both', existing.id)
+    } else {
+      db.prepare(`
+        INSERT INTO policies (user_id, external_id, category, title, content, sort_order, is_active, phase)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        req.userId, req.params.external_id, category, title, content,
+        sort_order ?? 0, is_active ?? 1, phase ?? 'both'
+      )
+    }
+    const row = db.prepare('SELECT * FROM policies WHERE user_id = ? AND external_id = ?')
+      .get(req.userId, req.params.external_id)
+    res.json(row)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// DELETE /api/policies/by-external/:external_id
+router.delete('/by-external/:external_id', (req, res) => {
+  try {
+    const info = db.prepare('DELETE FROM policies WHERE user_id = ? AND external_id = ?')
+      .run(req.userId, req.params.external_id)
+    if (info.changes === 0) return res.status(404).json({ error: 'Policy not found' })
+    res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
