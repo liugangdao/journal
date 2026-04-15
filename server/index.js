@@ -24,8 +24,30 @@ const app = express()
 const PORT = process.env.PORT ?? 3001
 
 app.set('trust proxy', 1)
+const isProd = process.env.NODE_ENV === 'production'
 app.use(helmet({
-  contentSecurityPolicy: false, // CSP finalized in Plan 3 once marketing + CDN are decided
+  contentSecurityPolicy: isProd
+    ? {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: [
+            "'self'",
+            "'unsafe-inline'",
+            'https://challenges.cloudflare.com',
+            'https://s3.tradingview.com',
+            'https://s.tradingview.com',
+          ],
+          frameSrc: [
+            'https://challenges.cloudflare.com',
+            'https://s.tradingview.com',
+          ],
+          connectSrc: ["'self'", 'https://api.resend.com'],
+          imgSrc: ["'self'", 'data:', 'https:'],
+          styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+          fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+        },
+      }
+    : false,
 }))
 app.use(express.json({ limit: '10mb' }))
 
@@ -66,15 +88,12 @@ app.use('/api', requireAuth, violationsRouter)
 // index.html — the explicit routes below decide which bundle entry renders.
 app.use(express.static(path.join(__dirname, 'public'), { index: false }))
 
-// `/` → marketing landing page; `/app` → trading journal app shell.
-// Both served from the same SPA bundle (main.jsx decides at mount time by
-// reading window.location.pathname).
-function sendIndex(req, res) {
+// Every marketing route + the app shell serves the same SPA bundle;
+// main.jsx reads window.location.pathname at mount to pick the root.
+function sendIndex(_req, res) {
   res.sendFile(path.join(__dirname, 'public', 'index.html'))
 }
-app.get('/', sendIndex)
-app.get('/app', sendIndex)
-app.get('/app/*path', sendIndex)
+app.get(['/', '/about', '/privacy', '/terms', '/app', '/app/*path'], sendIndex)
 
 app.listen(PORT, () => {
   console.log(`[server] listening on :${PORT}`)

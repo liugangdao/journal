@@ -11,9 +11,9 @@ export default defineConfig({
       registerType: 'prompt',
       includeAssets: ['icon.svg'],
       manifest: {
-        name: '交易日志',
-        short_name: '交易日志',
-        description: '外汇贵金属交易记录与分析',
+        name: 'Trading Journal',
+        short_name: 'Journal',
+        description: 'Forex, metals, and crypto perp trading journal. Works anonymously in your browser.',
         theme_color: '#0f172a',
         background_color: '#0f172a',
         display: 'standalone',

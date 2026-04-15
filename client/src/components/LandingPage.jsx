@@ -1,23 +1,10 @@
-import { useState } from 'react'
-import { ArrowRight, BookOpen, BarChart3, ShieldCheck, Lock, Sun, Moon } from 'lucide-react'
+import { ArrowRight, BookOpen, BarChart3, ShieldCheck, Lock } from 'lucide-react'
 import Dashboard from './Dashboard'
-import SignInDialog from './SignInDialog'
+import MarketingShell from './MarketingShell'
 import { SAMPLE_TRADES } from '../lib/sampleTrades'
 import { DEFAULT_PAIRS } from '../lib/defaults'
 import { useTheme } from '../hooks/useTheme'
 import { en } from '../i18n/en'
-
-function ThemeToggle({ theme, onToggle }) {
-  return (
-    <button
-      onClick={onToggle}
-      className="p-2 rounded-lg text-muted hover:text-text hover:bg-hover transition-all duration-200 cursor-pointer"
-      aria-label={theme === 'dark' ? en.more.themeLight : en.more.themeDark}
-    >
-      {theme === 'dark' ? <Sun size={18} strokeWidth={1.8} /> : <Moon size={18} strokeWidth={1.8} />}
-    </button>
-  )
-}
 
 function FeatureCard({ icon: Icon, title, body }) {
   return (
@@ -32,38 +19,11 @@ function FeatureCard({ icon: Icon, title, body }) {
 }
 
 export default function LandingPage() {
-  const { theme, toggleTheme } = useTheme()
-  const [signInOpen, setSignInOpen] = useState(false)
+  const { theme } = useTheme()
   const goToApp = () => { window.location.href = '/app' }
 
   return (
-    <div className="min-h-screen bg-bg text-text font-sans">
-      {/* Header */}
-      <header className="sticky top-0 z-40 backdrop-blur-xl bg-header-bg/80 border-b border-border">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-3">
-          <a href="/" className="flex items-baseline gap-2 cursor-pointer group">
-            <span className="text-lg font-bold tracking-tight group-hover:text-accent transition-colors">{en.app.titleShort}</span>
-            <span className="hidden sm:inline text-[11px] text-muted">{en.app.tagline}</span>
-          </a>
-          <div className="flex items-center gap-2">
-            <ThemeToggle theme={theme} onToggle={toggleTheme} />
-            <button
-              onClick={() => setSignInOpen(true)}
-              className="text-sm text-muted hover:text-text px-3 py-1.5 rounded-lg hover:bg-hover transition-colors cursor-pointer"
-            >
-              {en.landing.navSignIn}
-            </button>
-            <button
-              onClick={goToApp}
-              className="text-sm font-semibold bg-accent text-white px-4 py-1.5 rounded-lg hover:brightness-110 transition-all cursor-pointer"
-            >
-              {en.landing.navTryFree}
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Hero */}
+    <MarketingShell>
       <section className="max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-24 text-center">
         <div className="inline-block text-xs font-semibold tracking-wider text-accent uppercase mb-4">
           {en.landing.heroEyebrow}
@@ -86,7 +46,6 @@ export default function LandingPage() {
         <p className="text-xs text-muted mt-4">{en.landing.heroCtaSub}</p>
       </section>
 
-      {/* Features */}
       <section className="max-w-6xl mx-auto px-4 sm:px-6 py-12">
         <h2 className="text-2xl sm:text-3xl font-bold text-center mb-10">{en.landing.featuresTitle}</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -97,7 +56,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Live demo dashboard */}
       <section className="max-w-6xl mx-auto px-4 sm:px-6 py-16">
         <div className="text-center mb-8">
           <h2 className="text-2xl sm:text-3xl font-bold mb-3">{en.landing.demoTitle}</h2>
@@ -112,7 +70,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Bottom CTA */}
       <section className="max-w-3xl mx-auto px-4 sm:px-6 py-16 text-center">
         <h2 className="text-2xl sm:text-3xl font-bold mb-3">{en.landing.ctaTitle}</h2>
         <p className="text-sm text-muted mb-6">{en.landing.ctaSubtitle}</p>
@@ -124,20 +81,6 @@ export default function LandingPage() {
           <ArrowRight size={18} className="group-hover:translate-x-0.5 transition-transform" />
         </button>
       </section>
-
-      {/* Footer */}
-      <footer className="border-t border-border mt-12">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-muted">
-          <div>© {new Date().getFullYear()} {en.app.titleShort} · {en.landing.footerTagline}</div>
-          <div className="flex items-center gap-5">
-            <a href="/about" className="hover:text-text transition-colors">{en.landing.footerAbout}</a>
-            <a href="/privacy" className="hover:text-text transition-colors">{en.landing.footerPrivacy}</a>
-            <a href="/terms" className="hover:text-text transition-colors">{en.landing.footerTerms}</a>
-          </div>
-        </div>
-      </footer>
-
-      {signInOpen && <SignInDialog onClose={() => setSignInOpen(false)} />}
-    </div>
+    </MarketingShell>
   )
 }
