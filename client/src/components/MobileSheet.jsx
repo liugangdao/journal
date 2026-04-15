@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { tg } from '../hooks/useTelegram'
+import { en } from '../i18n/en'
 
 export default function MobileSheet({ open, onClose, title, children }) {
   const [closing, setClosing] = useState(false)
@@ -68,7 +69,7 @@ export default function MobileSheet({ open, onClose, title, children }) {
             onClick={handleClose}
             className="text-accent text-sm font-medium min-w-[60px] text-left active:opacity-70"
           >
-            取消
+            {en.common.cancel}
           </button>
           <span className="text-text text-[15px] font-semibold">{title}</span>
           <div className="min-w-[60px]" />

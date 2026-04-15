@@ -2,6 +2,7 @@ import Policies from './Policies'
 import Settings from './Settings'
 import ExportBar from './ExportBar'
 import { useTelegram } from '../hooks/useTelegram'
+import { en } from '../i18n/en'
 
 export default function MoreTab({ pairs, onPairsChange, onImported, theme, onToggleTheme, user, onLogout }) {
   const isTelegram = useTelegram()
@@ -11,23 +12,23 @@ export default function MoreTab({ pairs, onPairsChange, onImported, theme, onTog
       <div className="bg-card border border-border rounded-xl p-4">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <div className="text-sm font-semibold">{user?.display_name || user?.username}</div>
+            <div className="text-sm font-semibold">{user?.email || en.more.account}</div>
             {!isTelegram && user?.email && (
               <div className="text-xs text-muted">{user.email}</div>
             )}
           </div>
-          {!isTelegram && (
+          {!isTelegram && user && (
             <button
               onClick={onLogout}
               className="text-xs text-red px-3 py-1.5 rounded-lg border border-border
                 active:scale-[0.97] active:opacity-80 transition-all duration-100"
             >
-              退出登录
+              {en.more.logout}
             </button>
           )}
         </div>
         <div className="flex items-center justify-between pt-3 border-t border-border">
-          <span className="text-sm">深色模式</span>
+          <span className="text-sm">{theme === 'dark' ? en.more.themeDark : en.more.themeLight}</span>
           <button
             type="button"
             role="switch"
@@ -42,7 +43,7 @@ export default function MoreTab({ pairs, onPairsChange, onImported, theme, onTog
 
       {/* Export/Import */}
       <div>
-        <h3 className="text-sm font-bold mb-3">数据管理</h3>
+        <h3 className="text-sm font-bold mb-3">{en.export.title}</h3>
         <ExportBar onImported={onImported} />
       </div>
 

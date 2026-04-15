@@ -42,11 +42,13 @@ const illustrations = {
   ),
 }
 
+import { en } from '../i18n/en'
+
 const MESSAGES = {
-  trades: { title: '暂无交易记录', sub: '点击 + 记录你的第一笔交易' },
-  positions: { title: '当前无持仓', sub: '开仓后会在这里显示' },
-  notes: { title: '还没有复盘笔记', sub: '每周花15分钟复盘 — 坚持才能进步' },
-  dashboard: { title: '暂无数据', sub: '开始交易后这里会显示统计' },
+  trades: { title: en.empty.trades, sub: 'Tap + to log your first trade.' },
+  positions: { title: en.empty.openPositions, sub: 'Open positions will show here.' },
+  notes: { title: en.empty.notes, sub: 'Review weekly to stay sharp.' },
+  dashboard: { title: en.stats.noData, sub: 'Stats appear once you log trades.' },
 }
 
 export default function EmptyState({ type = 'trades', className = '' }) {

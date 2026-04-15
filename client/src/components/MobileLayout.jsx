@@ -1,13 +1,14 @@
 import { FileText, BarChart3, PenLine, Settings, Plus } from 'lucide-react'
 import MobileSheet from './MobileSheet'
 import TradeForm from './TradeForm'
+import { en } from '../i18n/en'
 
 const TABS = [
-  { key: 'record', label: '记录', title: '交易记录', icon: <FileText size={22} strokeWidth={1.8} /> },
-  { key: 'stats', label: '统计', title: '数据面板', icon: <BarChart3 size={22} strokeWidth={1.8} /> },
+  { key: 'record', label: en.tabs.record, title: en.tabs.record, icon: <FileText size={22} strokeWidth={1.8} /> },
+  { key: 'stats', label: en.tabs.stats, title: en.tabs.stats, icon: <BarChart3 size={22} strokeWidth={1.8} /> },
   { key: 'add', label: '', title: '', icon: null },
-  { key: 'notes', label: '笔记', title: '复盘笔记', icon: <PenLine size={22} strokeWidth={1.8} /> },
-  { key: 'more', label: '更多', title: '更多', icon: <Settings size={22} strokeWidth={1.8} /> },
+  { key: 'notes', label: en.tabs.notes, title: en.tabs.notes, icon: <PenLine size={22} strokeWidth={1.8} /> },
+  { key: 'more', label: en.tabs.more, title: en.tabs.more, icon: <Settings size={22} strokeWidth={1.8} /> },
 ]
 
 export default function MobileLayout({
@@ -16,8 +17,8 @@ export default function MobileLayout({
   showForm, formMode, formInitial, onNewTrade, onFormSubmit, onFormCancel,
   pairs, pairsByName, policies, editViolations, editing, closingId,
 }) {
-  const sheetTitle = formMode === 'close' ? '平仓记录' : formMode === 'edit' ? '编辑交易' : '记录交易'
-  const headerTitle = TABS.find(t => t.key === tab)?.title || '交易日志'
+  const sheetTitle = formMode === 'close' ? en.trade.closeTitle : formMode === 'edit' ? en.trade.editTitle : en.trade.recordTitle
+  const headerTitle = TABS.find(t => t.key === tab)?.title || en.app.titleShort
 
   const handleTabPress = (key) => {
     if (key === 'add') {

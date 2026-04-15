@@ -1,13 +1,14 @@
 import { Sun, Moon } from 'lucide-react'
 import Tab from './ui/Tab'
 import MobileLayout from './MobileLayout'
+import { en } from '../i18n/en'
 
 function ThemeToggle({ theme, onToggle }) {
   return (
     <button
       onClick={onToggle}
       className="p-2 rounded-lg text-muted hover:text-text hover:bg-hover transition-all duration-200 cursor-pointer"
-      title={theme === 'dark' ? '切换到亮色' : '切换到暗色'}
+      title={theme === 'dark' ? en.more.themeLight : en.more.themeDark}
     >
       {theme === 'dark' ? <Sun size={18} strokeWidth={1.8} /> : <Moon size={18} strokeWidth={1.8} />}
     </button>
@@ -46,19 +47,19 @@ export default function Layout({
           <header className="sticky top-0 z-50 backdrop-blur-xl bg-header-bg border-b border-border">
             <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between flex-wrap gap-3">
               <div>
-                <h1 className="text-lg sm:text-xl font-bold tracking-tight">交易日志</h1>
+                <h1 className="text-lg sm:text-xl font-bold tracking-tight">{en.app.titleShort}</h1>
                 <p className="text-[10px] sm:text-xs text-muted mt-0.5">
-                  外汇 &middot; 贵金属 &middot; 能源 &nbsp;|&nbsp; 已平仓 {tradeCount} 笔{openCount > 0 && <> &middot; 持仓中 {openCount} 笔</>}
+                  {en.app.tagline} &nbsp;|&nbsp; {tradeCount} {en.app.closedCount}{openCount > 0 && <> &middot; {openCount} {en.app.openCount}</>}
                 </p>
               </div>
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <div className="flex gap-1 bg-card/80 rounded-xl p-1 overflow-x-auto">
-                  <Tab active={tab === "stats"} onClick={() => setTab("stats")}>数据面板</Tab>
-                  <Tab active={tab === "record"} onClick={() => setTab("record")}>交易记录</Tab>
-                  <Tab active={tab === "weekly"} onClick={() => setTab("weekly")}>周度复盘</Tab>
-                  <Tab active={tab === "monthly"} onClick={() => setTab("monthly")}>月度复盘</Tab>
-                  <Tab active={tab === "policy"} onClick={() => setTab("policy")}>交易政策</Tab>
-                  <Tab active={tab === "settings"} onClick={() => setTab("settings")}>设置</Tab>
+                  <Tab active={tab === "stats"} onClick={() => setTab("stats")}>{en.tabs.stats}</Tab>
+                  <Tab active={tab === "record"} onClick={() => setTab("record")}>{en.tabs.record}</Tab>
+                  <Tab active={tab === "weekly"} onClick={() => setTab("weekly")}>{en.tabs.weekly}</Tab>
+                  <Tab active={tab === "monthly"} onClick={() => setTab("monthly")}>{en.tabs.monthly}</Tab>
+                  <Tab active={tab === "policy"} onClick={() => setTab("policy")}>{en.tabs.policy}</Tab>
+                  <Tab active={tab === "settings"} onClick={() => setTab("settings")}>{en.tabs.settings}</Tab>
                 </div>
                 <ThemeToggle theme={theme} onToggle={onToggleTheme} />
                 {signInSlot}
@@ -69,7 +70,7 @@ export default function Layout({
                       onClick={onLogout}
                       className="text-xs text-muted hover:text-red transition-colors cursor-pointer px-2 py-1 rounded-md hover:bg-hover"
                     >
-                      退出
+                      {en.app.signOut}
                     </button>
                   </div>
                 )}
