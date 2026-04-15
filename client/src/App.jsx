@@ -400,7 +400,7 @@ function AppContent() {
         {tab === "record" && (
           <div>
             <TradeFilter filter={tradeFilter} onChange={handleFilterChange} pairs={pairNames} />
-            <ExportBar onImported={reloadData} />
+            <ExportBar storeAdapter={storeAdapter} onImported={reloadData} />
             <PsychologyPanel
               trades={allTrades}
               pairs={pairNames}

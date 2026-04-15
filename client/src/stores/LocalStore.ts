@@ -8,7 +8,7 @@ import type {
   TradeViolation,
   MigratePayload,
 } from './types'
-import type { JournalStore } from './JournalStore'
+import type { JournalStore, ImportResult } from './JournalStore'
 import { DEFAULT_PAIRS, DEFAULT_POLICIES } from '../lib/defaults'
 
 type ViolationRow = TradeViolation & { id?: number }
@@ -175,6 +175,51 @@ export class LocalStore implements JournalStore {
       pairs,
       trade_violations: trade_violations.map(({ id: _id, ...rest }) => rest),
     }
+  }
+
+  async importAll(payload: MigratePayload): Promise<ImportResult> {
+    // bulkPut is upsert-by-primary-key (external_id), so re-importing an
+    // export is idempotent and partial overlaps just overwrite existing rows.
+    const result: ImportResult = {
+      trades: 0, weekly_notes: 0, monthly_notes: 0,
+      policies: 0, pairs: 0, trade_violations: 0,
+    }
+    await this.db.transaction(
+      'rw',
+      this.db.trades,
+      this.db.weekly_notes,
+      this.db.monthly_notes,
+      this.db.policies,
+      this.db.pairs,
+      this.db.trade_violations,
+      async () => {
+        if (payload.trades?.length) {
+          await this.db.trades.bulkPut(payload.trades)
+          result.trades = payload.trades.length
+        }
+        if (payload.weekly_notes?.length) {
+          await this.db.weekly_notes.bulkPut(payload.weekly_notes)
+          result.weekly_notes = payload.weekly_notes.length
+        }
+        if (payload.monthly_notes?.length) {
+          await this.db.monthly_notes.bulkPut(payload.monthly_notes)
+          result.monthly_notes = payload.monthly_notes.length
+        }
+        if (payload.policies?.length) {
+          await this.db.policies.bulkPut(payload.policies)
+          result.policies = payload.policies.length
+        }
+        if (payload.pairs?.length) {
+          await this.db.pairs.bulkPut(payload.pairs)
+          result.pairs = payload.pairs.length
+        }
+        if (payload.trade_violations?.length) {
+          await this.db.trade_violations.bulkPut(payload.trade_violations as ViolationRow[])
+          result.trade_violations = payload.trade_violations.length
+        }
+      }
+    )
+    return result
   }
 
   async clearAll(): Promise<void> {

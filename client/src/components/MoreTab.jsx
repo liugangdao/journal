@@ -44,7 +44,7 @@ export default function MoreTab({ pairs, onPairsChange, policies, setPolicies, s
       {/* Export/Import */}
       <div>
         <h3 className="text-sm font-bold mb-3">{en.export.title}</h3>
-        <ExportBar onImported={onImported} />
+        <ExportBar storeAdapter={storeAdapter} onImported={onImported} />
       </div>
 
       {/* Policies */}

@@ -7,7 +7,7 @@ import type {
   TradeViolation,
   MigratePayload,
 } from './types'
-import type { JournalStore } from './JournalStore'
+import type { JournalStore, ImportResult } from './JournalStore'
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE'
 
@@ -132,7 +132,27 @@ export class ApiStore implements JournalStore {
   }
 
   async exportAll(): Promise<MigratePayload> {
-    return request<MigratePayload>('/api/export')
+    // No dedicated /api/export endpoint — aggregate from list calls.
+    // trade_violations are per-trade; fetch each trade's violations in
+    // parallel and denormalize into flat rows.
+    const [trades, weekly_notes, monthly_notes, policies, pairs] = await Promise.all([
+      this.listTrades(),
+      this.listWeeklyNotes(),
+      this.listMonthlyNotes(),
+      this.listPolicies(),
+      this.listPairs(),
+    ])
+    const violationLists = await Promise.all(
+      trades.map((t) => this.listViolationsForTrade(t.external_id))
+    )
+    const trade_violations = violationLists.flat()
+    return { trades, weekly_notes, monthly_notes, policies, pairs, trade_violations }
+  }
+
+  async importAll(payload: MigratePayload): Promise<ImportResult> {
+    // /api/migrate already does INSERT OR IGNORE with external_id dedup,
+    // which is exactly the semantics we want for import-merge.
+    return request<ImportResult>('/api/migrate', 'POST', payload)
   }
 
   async clearAll(): Promise<void> {

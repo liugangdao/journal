@@ -47,6 +47,10 @@ export interface StoreAdapter {
 
   getViolationStats: () => Promise<unknown>
 
+  // Export / import — thin pass-through to JournalStore.
+  exportAll: JournalStore['exportAll']
+  importAll: JournalStore['importAll']
+
   logout: () => Promise<void>
 }
 
@@ -185,6 +189,9 @@ export function useStoreAdapter(store: JournalStore): StoreAdapter {
           return {}
         }
       },
+
+      exportAll: () => store.exportAll(),
+      importAll: (payload) => store.importAll(payload),
 
       logout: async () => {
         try {

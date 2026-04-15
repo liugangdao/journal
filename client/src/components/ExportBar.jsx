@@ -1,70 +1,75 @@
 import { useState, useRef } from 'react'
-import { api } from '../hooks/useApi'
 import { en } from '../i18n/en'
 
-export default function ExportBar({ onImported }) {
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
+function triggerDownload(payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const ts = new Date().toISOString().slice(0, 10)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `journal-export-${ts}.json`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+export default function ExportBar({ storeAdapter, onImported }) {
   const [importing, setImporting] = useState(false)
-  const [importMsg, setImportMsg] = useState('')
-  const [importErr, setImportErr] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState(false)
   const fileRef = useRef(null)
 
-  const handleExport = () => {
-    api.exportData(from || undefined, to || undefined)
+  const handleExport = async () => {
+    setExporting(true)
+    setMsg('')
+    setErr(false)
+    try {
+      const payload = await storeAdapter.exportAll()
+      triggerDownload(payload)
+    } catch (e) {
+      setErr(true)
+      setMsg(e.message || 'Export failed')
+    } finally {
+      setExporting(false)
+    }
   }
 
   const handleImport = async (e) => {
     const file = e.target.files[0]
     if (!file) return
     setImporting(true)
-    setImportMsg('')
-    setImportErr(false)
+    setMsg('')
+    setErr(false)
     try {
       const text = await file.text()
       const data = JSON.parse(text)
-      const result = await api.importData(data)
-      const r = result.imported
-      setImportMsg(`${en.export.imported}: ${r.trades} trades, ${r.weeklyNotes} weekly, ${r.monthlyNotes} monthly`)
+      const result = await storeAdapter.importAll(data)
+      setMsg(
+        `${en.export.imported}: ${result.trades} trades, ${result.weekly_notes} weekly, ${result.monthly_notes} monthly, ${result.policies} policies, ${result.pairs} pairs`
+      )
       if (onImported) onImported()
-    } catch (err) {
-      setImportErr(true)
-      setImportMsg(`${en.export.importFailed}: ${err.message}`)
+    } catch (e2) {
+      setErr(true)
+      setMsg(`${en.export.importFailed}: ${e2.message}`)
     } finally {
       setImporting(false)
-      fileRef.current.value = ''
+      if (fileRef.current) fileRef.current.value = ''
     }
   }
 
   return (
     <div className="mb-5 space-y-2">
-      <div className="flex items-end gap-2 sm:gap-3 flex-wrap">
-        <div>
-          <div className="text-[11px] text-muted mb-1">{en.filter.from}</div>
-          <input
-            type="date"
-            value={from}
-            onChange={e => setFrom(e.target.value)}
-            className="bg-input text-text border border-border rounded-lg px-3 py-1.5 text-xs outline-none
-              focus:border-accent focus:ring-1 focus:ring-accent/30 transition-all duration-200"
-          />
-        </div>
-        <div>
-          <div className="text-[11px] text-muted mb-1">{en.filter.to}</div>
-          <input
-            type="date"
-            value={to}
-            onChange={e => setTo(e.target.value)}
-            className="bg-input text-text border border-border rounded-lg px-3 py-1.5 text-xs outline-none
-              focus:border-accent focus:ring-1 focus:ring-accent/30 transition-all duration-200"
-          />
-        </div>
+      <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
         <button
           onClick={handleExport}
+          disabled={exporting}
           className="px-4 py-1.5 rounded-lg text-xs font-medium text-muted border border-border
-            hover:text-text hover:border-accent/50 transition-all duration-200 cursor-pointer"
+            hover:text-text hover:border-accent/50 transition-all duration-200 cursor-pointer
+            disabled:opacity-50 disabled:pointer-events-none"
         >
-          {en.export.export}
+          {exporting ? '…' : en.export.export}
         </button>
         <label
           className={`px-4 py-1.5 rounded-lg text-xs font-medium text-muted border border-border
@@ -72,21 +77,11 @@ export default function ExportBar({ onImported }) {
             ${importing ? 'opacity-50 pointer-events-none' : ''}`}
         >
           {importing ? en.export.importing : en.export.import}
-          <input ref={fileRef} type="file" accept=".json" onChange={handleImport} className="hidden" />
+          <input ref={fileRef} type="file" accept=".json,application/json" onChange={handleImport} className="hidden" />
         </label>
-        {(from || to) && (
-          <button
-            onClick={() => { setFrom(''); setTo('') }}
-            className="px-3 py-1.5 rounded-lg text-xs text-muted hover:text-text transition-colors cursor-pointer"
-          >
-            {en.filter.clear}
-          </button>
-        )}
       </div>
-      {importMsg && (
-        <p className={`text-xs ${importErr ? 'text-red' : 'text-green'}`}>
-          {importMsg}
-        </p>
+      {msg && (
+        <p className={`text-xs ${err ? 'text-red' : 'text-green'}`}>{msg}</p>
       )}
     </div>
   )

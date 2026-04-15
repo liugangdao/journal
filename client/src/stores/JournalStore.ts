@@ -34,5 +34,15 @@ export interface JournalStore {
   setViolationsForTrade(tradeExternalId: string, policyExternalIds: string[]): Promise<void>
 
   exportAll(): Promise<MigratePayload>
+  importAll(payload: MigratePayload): Promise<ImportResult>
   clearAll(): Promise<void>
+}
+
+export interface ImportResult {
+  trades: number
+  weekly_notes: number
+  monthly_notes: number
+  policies: number
+  pairs: number
+  trade_violations: number
 }
