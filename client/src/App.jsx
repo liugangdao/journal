@@ -16,7 +16,11 @@ import Policies from './components/Policies'
 import NotesTab from './components/NotesTab'
 import MoreTab from './components/MoreTab'
 import PwaPrompt from './components/PwaPrompt'
-import { api } from './hooks/useApi'
+import { useStore } from './hooks/useStore'
+import { useStoreAdapter } from './hooks/useStoreAdapter'
+import { useMigrationTrigger } from './hooks/useMigrationTrigger'
+import SignInButton from './components/SignInButton'
+import { en } from './i18n/en'
 import { useTheme } from './hooks/useTheme'
 import { ToastProvider, useToast } from './components/ui/Toast'
 import { SkeletonKpi, SkeletonCard, SkeletonChart } from './components/ui/Skeleton'
@@ -24,10 +28,6 @@ import ConfirmDialog from './components/ui/ConfirmDialog'
 
 
 function AppContent() {
-  // Auth state: null = checking, false = logged out, object = logged in
-  const [authUser, setAuthUser] = useState(null)
-  const [authChecked, setAuthChecked] = useState(false)
-
   const [allTrades, setAllTrades] = useState([])
   const [pagedTrades, setPagedTrades] = useState([])
   const [tradePagination, setTradePagination] = useState({ total: 0, limit: 20, offset: 0 })
@@ -46,25 +46,10 @@ function AppContent() {
   const toast = useToast()
   const [confirmState, setConfirmState] = useState({ open: false, id: null, type: null })
 
-  // Check auth on mount
-  useEffect(() => {
-    api.getMe()
-      .then(user => {
-        setAuthUser(user || false)
-        setAuthChecked(true)
-      })
-      .catch(() => {
-        setAuthUser(false)
-        setAuthChecked(true)
-      })
-  }, [])
-
-  // Set 401 handler to log user out
-  useEffect(() => {
-    api.setUnauthorizedHandler(() => {
-      setAuthUser(false)
-    })
-  }, [])
+  const { store, isAuthenticated, userEmail, loading: storeLoading } = useStore()
+  const storeAdapter = useStoreAdapter(store)
+  const [migrationStatus, setMigrationStatus] = useState('idle')
+  useMigrationTrigger(setMigrationStatus)
 
   // Load data when authenticated
   const fetchPagedTrades = useCallback((filter, offset = 0) => {
@@ -73,35 +58,34 @@ function AppContent() {
     if (filter.date_to) params.date_to = filter.date_to
     if (filter.pair) params.pair = filter.pair
     if (filter.direction) params.direction = filter.direction
-    return api.getTrades(params).then(result => {
+    return storeAdapter.getTrades(params).then(result => {
       setPagedTrades(result.trades)
       setTradePagination({ total: result.total, limit: result.limit, offset: result.offset })
     })
-  }, [])
+  }, [storeAdapter])
 
   const reloadData = useCallback(() => {
     return Promise.all([
-      api.getTrades(),
-      api.getNotes(), api.getMonthlyNotes(), api.getPairs(), api.getPolicies()
+      storeAdapter.getTrades(),
+      storeAdapter.getNotes(), storeAdapter.getMonthlyNotes(), storeAdapter.getPairs(), storeAdapter.getPolicies()
     ]).then(([allResult, n, mn, p, pol]) => {
       setAllTrades(allResult.trades)
       setNotes(n); setMonthlyNotes(mn); setPairs(p); setPolicies(pol)
     }).catch(console.error)
-  }, [])
+  }, [storeAdapter])
 
   useEffect(() => {
-    if (!authUser) return
+    if (!isAuthenticated) return
     setLoading(true)
     Promise.all([reloadData(), fetchPagedTrades(tradeFilter)]).finally(() => setLoading(false))
-  }, [authUser, reloadData, fetchPagedTrades])
+  }, [isAuthenticated, reloadData, fetchPagedTrades])
 
   const handleLogout = useCallback(async () => {
     try {
-      await api.logout()
+      await storeAdapter.logout()
     } catch (err) {
       console.error(err)
     }
-    setAuthUser(false)
     setAllTrades([])
     setPagedTrades([])
     setTradePagination({ total: 0, limit: 20, offset: 0 })
@@ -110,7 +94,8 @@ function AppContent() {
     setMonthlyNotes([])
     setPairs([])
     setPolicies([])
-  }, [])
+    window.location.reload()
+  }, [storeAdapter])
 
   const handleFilterChange = useCallback((newFilter) => {
     setTradeFilter(newFilter)
@@ -136,13 +121,13 @@ function AppContent() {
     try {
       const { violations, ...tradeData } = form
       if (editing) {
-        await api.updateTrade(editing, tradeData)
-        await api.updateTradeViolations(editing, violations || [])
+        await storeAdapter.updateTrade(editing, tradeData)
+        await storeAdapter.updateTradeViolations(editing, violations || [])
         setEditing(null)
       } else {
-        const created = await api.createTrade(tradeData)
+        const created = await storeAdapter.createTrade(tradeData)
         if (violations && violations.length > 0) {
-          await api.updateTradeViolations(created.id, violations)
+          await storeAdapter.updateTradeViolations(created.id, violations)
         }
       }
       setShowForm(false)
@@ -154,7 +139,7 @@ function AppContent() {
       console.error(err)
       toast.error('操作失败，请重试')
     }
-  }, [editing, toast])
+  }, [editing, toast, storeAdapter])
 
   const handleCloseTrade = useCallback((trade) => {
     setClosingId(trade.id)
@@ -165,8 +150,8 @@ function AppContent() {
   const handleCloseSubmit = useCallback(async (form) => {
     try {
       const { violations, ...tradeData } = form
-      await api.updateTrade(closingId, { ...tradeData, status: 'closed' })
-      await api.updateTradeViolations(closingId, violations || [])
+      await storeAdapter.updateTrade(closingId, { ...tradeData, status: 'closed' })
+      await storeAdapter.updateTradeViolations(closingId, violations || [])
       setClosingId(null)
       setShowForm(false)
       reloadData()
@@ -176,25 +161,25 @@ function AppContent() {
       console.error(err)
       toast.error('平仓失败，请重试')
     }
-  }, [closingId, toast])
+  }, [closingId, toast, storeAdapter])
 
   const handleEditTrade = useCallback(async (trade) => {
     setEditing(trade.id)
     setClosingId(null)
     setTab("record")
     try {
-      const violations = await api.getTradeViolations(trade.id)
-      setEditViolations(violations.map(v => v.policy_id))
+      const violations = await storeAdapter.getTradeViolations(trade.id)
+      setEditViolations(violations.map(v => v.policy_external_id))
     } catch (err) {
       console.error(err)
       setEditViolations([])
     }
     setShowForm(true)
-  }, [])
+  }, [storeAdapter])
 
   const handleDeleteTrade = useCallback(async (id) => {
     try {
-      await api.deleteTrade(id)
+      await storeAdapter.deleteTrade(id)
       reloadData()
       fetchPagedTrades(tradeFilter, tradePagination.offset)
       toast.success('已删除')
@@ -202,7 +187,7 @@ function AppContent() {
       console.error(err)
       toast.error('删除失败，请重试')
     }
-  }, [toast])
+  }, [toast, storeAdapter])
 
   const handleCancelForm = useCallback(() => {
     setShowForm(false)
@@ -220,7 +205,7 @@ function AppContent() {
 
   const handleAddMissed = useCallback(async (form) => {
     try {
-      await api.createTrade(form)
+      await storeAdapter.createTrade(form)
       reloadData()
       fetchPagedTrades(tradeFilter, tradePagination.offset)
       toast.success('踏空记录已添加')
@@ -228,53 +213,53 @@ function AppContent() {
       console.error(err)
       toast.error('记录失败，请重试')
     }
-  }, [toast])
+  }, [toast, storeAdapter])
 
   // Notes CRUD
   const handleAddNote = useCallback(async (form) => {
     try {
-      const created = await api.createNote(form)
+      const created = await storeAdapter.createNote(form)
       setNotes(prev => [created, ...prev])
       toast.success('笔记已保存')
     } catch (err) {
       console.error(err)
       toast.error('保存失败，请重试')
     }
-  }, [toast])
+  }, [toast, storeAdapter])
 
   const handleDeleteNote = useCallback(async (id) => {
     try {
-      await api.deleteNote(id)
+      await storeAdapter.deleteNote(id)
       setNotes(prev => prev.filter(n => n.id !== id))
       toast.success('已删除')
     } catch (err) {
       console.error(err)
       toast.error('删除失败，请重试')
     }
-  }, [toast])
+  }, [toast, storeAdapter])
 
   // Monthly Notes CRUD
   const handleAddMonthlyNote = useCallback(async (form) => {
     try {
-      const created = await api.createMonthlyNote(form)
+      const created = await storeAdapter.createMonthlyNote(form)
       setMonthlyNotes(prev => [created, ...prev])
       toast.success('笔记已保存')
     } catch (err) {
       console.error(err)
       toast.error('保存失败，请重试')
     }
-  }, [toast])
+  }, [toast, storeAdapter])
 
   const handleDeleteMonthlyNote = useCallback(async (id) => {
     try {
-      await api.deleteMonthlyNote(id)
+      await storeAdapter.deleteMonthlyNote(id)
       setMonthlyNotes(prev => prev.filter(n => n.id !== id))
       toast.success('已删除')
     } catch (err) {
       console.error(err)
       toast.error('删除失败，请重试')
     }
-  }, [toast])
+  }, [toast, storeAdapter])
 
   // Delete confirmation
   const requestDelete = useCallback((id, type) => {
@@ -306,7 +291,7 @@ function AppContent() {
       : emptyTrade(pairNames)
 
   // Loading auth check
-  if (!authChecked) {
+  if (storeLoading) {
     return (
       <div className="min-h-screen bg-bg flex items-center justify-center text-muted">
         加载中...
@@ -315,7 +300,7 @@ function AppContent() {
   }
 
   // Not logged in - show landing
-  if (!authUser) {
+  if (!isAuthenticated) {
     return <LandingPage onNavigateAuth={() => {}} theme={theme} onToggleTheme={toggleTheme} />
   }
 
@@ -373,7 +358,7 @@ function AppContent() {
       case 'more': return (
         <MoreTab
           pairs={pairs} onPairsChange={setPairs} onImported={reloadData}
-          theme={theme} onToggleTheme={toggleTheme} user={authUser} onLogout={handleLogout}
+          theme={theme} onToggleTheme={toggleTheme} user={isAuthenticated ? { email: userEmail } : null} onLogout={handleLogout}
         />
       )
       default: return null
@@ -383,7 +368,7 @@ function AppContent() {
   return (
     <Layout
       tab={tab} setTab={setTab} tradeCount={closedTrades.length} openCount={openTrades.length}
-      theme={theme} onToggleTheme={toggleTheme} user={authUser} onLogout={handleLogout}
+      theme={theme} onToggleTheme={toggleTheme} user={isAuthenticated ? { email: userEmail } : null} onLogout={handleLogout}
       // Mobile sheet props
       showForm={showForm} formMode={formMode} formInitial={formInitial}
       onNewTrade={handleNewTrade} onFormSubmit={closingId ? handleCloseSubmit : handleAddTrade}
