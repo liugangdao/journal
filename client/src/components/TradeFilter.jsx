@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import Select from './ui/Select'
+import { en } from '../i18n/en'
 
 const QUICK_OPTIONS = [
-  { label: '今天', key: 'today' },
-  { label: '本周', key: 'week' },
-  { label: '本月', key: 'month' },
-  { label: '全部', key: 'all' },
+  { labelKey: 'today', key: 'today', label: 'Today' },
+  { labelKey: 'week', key: 'week', label: 'Week' },
+  { labelKey: 'month', key: 'month', label: 'Month' },
+  { labelKey: 'all', key: 'all', label: 'All' },
 ]
 
 function getDateRange(key) {
@@ -50,8 +51,15 @@ export default function TradeFilter({ filter, onChange, pairs }) {
     onChange({ ...filter, direction: v || null })
   }
 
-  const pairOptions = ['全部', ...(pairs || [])]
-  const dirOptions = ['全部', '多(Buy)', '空(Sell)']
+  const pairOptions = [
+    { value: '', label: en.filter.all },
+    ...(pairs || []).map(p => ({ value: p, label: p })),
+  ]
+  const dirOptions = [
+    { value: '', label: en.filter.all },
+    { value: 'long', label: en.trade.long },
+    { value: 'short', label: en.trade.short },
+  ]
 
   return (
     <div className="mb-4 flex items-center gap-2 flex-wrap">
@@ -71,17 +79,17 @@ export default function TradeFilter({ filter, onChange, pairs }) {
         ))}
       </div>
       <div className="hidden sm:flex items-center gap-2 ml-auto">
-        <div className="w-[120px]">
+        <div className="w-[140px]">
           <Select
-            value={filter.pair || '全部'}
-            onChange={v => handlePair(v === '全部' ? null : v)}
+            value={filter.pair || ''}
+            onChange={v => handlePair(v || null)}
             options={pairOptions}
           />
         </div>
-        <div className="w-[100px]">
+        <div className="w-[110px]">
           <Select
-            value={filter.direction || '全部'}
-            onChange={v => handleDirection(v === '全部' ? null : v)}
+            value={filter.direction || ''}
+            onChange={v => handleDirection(v || null)}
             options={dirOptions}
           />
         </div>
