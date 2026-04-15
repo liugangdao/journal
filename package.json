@@ -13,7 +13,9 @@
     "test:ui": "vitest --ui"
   },
   "devDependencies": {
+    "@vitejs/plugin-react": "^5.2.0",
     "concurrently": "^9.1.0",
+    "jsdom": "^29.0.2",
     "tsx": "^4.21.0",
     "vitest": "^4.1.4"
   }
