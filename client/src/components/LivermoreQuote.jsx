@@ -34,8 +34,7 @@ export default function LivermoreQuote() {
       <div
         className={`transition-opacity duration-400 ${visible ? 'opacity-100' : 'opacity-0'}`}
       >
-        <p className="text-sm italic text-text/80 leading-relaxed">"{quote.zh}"</p>
-        <p className="text-xs italic text-muted mt-1 leading-relaxed">"{quote.en}"</p>
+        <p className="text-sm italic text-text/80 leading-relaxed">"{quote}"</p>
         <p className="text-[10px] text-muted/60 mt-1.5 text-right">— Jesse Livermore</p>
       </div>
     </div>
