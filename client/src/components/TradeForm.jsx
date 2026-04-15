@@ -64,13 +64,30 @@ export default function TradeForm({ initial, editing, mode = "edit", pairs, pair
 
   const requiredFields = isClose ? REQUIRED_CLOSE : hideExit ? REQUIRED_OPEN_ONLY : REQUIRED_FULL
 
+  // Fields that need to be coerced from string → number before persisting.
+  // Blank strings become null so enrichTrade/calcTrade see real numbers.
+  const NUMERIC_FIELDS = ["lots", "entry", "stop", "target", "exit_price", "gross_pnl", "swap", "risk_amount", "quantity"]
+  function coerceNumeric(obj) {
+    const out = { ...obj }
+    for (const k of NUMERIC_FIELDS) {
+      const v = out[k]
+      if (v === '' || v === undefined) {
+        out[k] = null
+      } else if (typeof v === 'string') {
+        const n = parseFloat(v)
+        out[k] = Number.isFinite(n) ? n : null
+      }
+    }
+    return out
+  }
+
   const handleSubmit = async () => {
     const missing = requiredFields.filter(k => !form[k] && form[k] !== 0)
     if (missing.length) {
       setError(en.trade.requiredFieldsError)
       return
     }
-    const payload = { ...form }
+    const payload = coerceNumeric(form)
     if (hideExit) payload.status = "open"
     if (isClose) payload.status = "closed"
     if (isClose && !payload.close_time) payload.close_time = now()

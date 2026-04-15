@@ -11,6 +11,17 @@ export interface EnrichedTrade extends TradeRow {
   spread: number
 }
 
+// Coerce legacy LocalStore rows whose numeric fields were saved as strings
+// (pre-Plan-3 writes). Safe on already-numeric values.
+function num(v: unknown): number {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = parseFloat(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  return 0
+}
+
 export function enrichTrade(t: TradeRow, pair: Pair | undefined): EnrichedTrade {
   let pips: number | null = null
   let grossPnlCalc: number | null = null
@@ -25,10 +36,10 @@ export function enrichTrade(t: TradeRow, pair: Pair | undefined): EnrichedTrade 
       // mismatched asset class — fall through
     }
   }
-  const gross = grossPnlCalc ?? t.gross_pnl ?? 0
-  const swap = t.swap ?? 0
+  const gross = grossPnlCalc ?? num(t.gross_pnl)
+  const swap = num(t.swap)
   const netPnl = gross + swap
-  const lots = t.lots ?? 0
+  const lots = num(t.lots)
   const spread = pair ? pair.spread_cost * lots : 0
   const weekday = t.open_time ? WEEKDAYS[new Date(t.open_time).getDay()] : ''
   return { ...t, netPnl, rMultiple, pips, weekday, spread }

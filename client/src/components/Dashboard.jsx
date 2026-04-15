@@ -1,10 +1,9 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import KpiCard from './ui/KpiCard'
 import Disclosure from './ui/Disclosure'
 import EmptyState from './EmptyState'
 import { calcStats } from '../lib/tradeCalc'
-import { api } from '../hooks/useApi'
 import { en } from '../i18n/en'
 
 const THEME_COLORS = {
@@ -36,12 +35,6 @@ export default function Dashboard({ trades, pairs = [], theme = 'dark' }) {
   const pairsByName = useMemo(() => new Map(pairs.map((p) => [p.name, p])), [pairs])
   const stats = useMemo(() => calcStats(trades, pairsByName), [trades, pairsByName])
   const C = THEME_COLORS[theme] || THEME_COLORS.dark
-  const [violationStats, setViolationStats] = useState(null)
-  useEffect(() => {
-    if (api.getViolationStats) {
-      api.getViolationStats().then(setViolationStats).catch(() => {})
-    }
-  }, [])
   const tooltipStyle = { background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }
 
   const currentWeek = isoWeek(new Date().toISOString())
@@ -148,46 +141,6 @@ export default function Dashboard({ trades, pairs = [], theme = 'dark' }) {
         ))}
       </div>
 
-      {violationStats && violationStats.totalViolations > 0 && (
-        <div className="mt-8">
-          <h3 className="text-base font-bold mb-4">{en.policy.violations}</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-            <div className="bg-card border border-border rounded-xl p-4">
-              <div className="text-[11px] text-muted mb-1">{en.policy.violations}</div>
-              <div className="text-2xl font-bold text-red">{violationStats.totalViolations}</div>
-            </div>
-            <div className="bg-card border border-border rounded-xl p-4">
-              <div className="text-[11px] text-muted mb-1">{en.stats.tradeCount}</div>
-              <div className="text-2xl font-bold">{violationStats.tradesWithViolations}</div>
-            </div>
-          </div>
-          {violationStats.topViolated.length > 0 && (
-            <div className="bg-card border border-border rounded-xl p-4">
-              <div className="text-[11px] text-muted mb-3 font-medium">{en.policy.title}</div>
-              <div className="space-y-2">
-                {violationStats.topViolated.slice(0, 5).map(v => {
-                  const catLabel = en.policy.categories[v.category] || v.category
-                  return (
-                    <div key={v.id} className="flex items-center gap-3">
-                      <span className="text-[10px] bg-red/10 text-red px-1.5 py-0.5 rounded font-medium shrink-0">{catLabel}</span>
-                      <span className="text-sm flex-1 truncate">{v.title}</span>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <div className="h-2 bg-red/20 rounded-full overflow-hidden" style={{ width: '80px' }}>
-                          <div
-                            className="h-full bg-red rounded-full"
-                            style={{ width: `${(v.count / violationStats.topViolated[0].count) * 100}%` }}
-                          />
-                        </div>
-                        <span className="text-xs font-mono text-muted w-6 text-right">{v.count}</span>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   )
 }
