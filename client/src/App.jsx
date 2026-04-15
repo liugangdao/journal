@@ -24,6 +24,7 @@ import { useTheme } from './hooks/useTheme'
 import { ToastProvider, useToast } from './components/ui/Toast'
 import { SkeletonKpi, SkeletonCard, SkeletonChart } from './components/ui/Skeleton'
 import ConfirmDialog from './components/ui/ConfirmDialog'
+import { SAMPLE_TRADES } from './lib/sampleTrades'
 
 
 function AppContent() {
@@ -111,6 +112,12 @@ function AppContent() {
   const closedTrades = useMemo(() => allTrades.filter(t => t.status === 'closed'), [allTrades])
   const pairNames = useMemo(() => pairs.map(p => p.name), [pairs])
   const pairsByName = useMemo(() => new Map(pairs.map((p) => [p.name, p])), [pairs])
+
+  // Sample-mode: when the user has zero trades of their own, the Stats tab
+  // shows hardcoded sample trades so the dashboard isn't an empty shell on
+  // first visit. Switches off the moment the user logs a real trade.
+  const isSampleMode = allTrades.length === 0
+  const dashboardTrades = isSampleMode ? SAMPLE_TRADES : closedTrades
 
   // Trade CRUD — all IDs are external_id strings (stable across LocalStore/ApiStore)
   const handleAddTrade = useCallback(async (form) => {
@@ -338,7 +345,7 @@ function AppContent() {
           <TradeTable trades={pagedTrades.filter(t => t.status === 'closed')} onEdit={handleEditTrade} onDelete={confirmDeleteTrade} pairsByName={pairsByName} pagination={tradePagination} onPageChange={handlePageChange} />
         </div>
       )
-      case 'stats': return <Dashboard trades={closedTrades} pairs={pairs} theme={theme} />
+      case 'stats': return <Dashboard trades={dashboardTrades} pairs={pairs} theme={theme} isSampleMode={isSampleMode} onRecordCta={() => setTab('record')} />
       case 'notes': return (
         <NotesTab
           notes={notes} monthlyNotes={monthlyNotes}
@@ -428,7 +435,7 @@ function AppContent() {
             <TradeTable trades={pagedTrades.filter(t => t.status === 'closed')} onEdit={handleEditTrade} onDelete={confirmDeleteTrade} pairsByName={pairsByName} pagination={tradePagination} onPageChange={handlePageChange} />
           </div>
         )}
-        {tab === "stats" && <Dashboard trades={closedTrades} pairs={pairs} theme={theme} />}
+        {tab === "stats" && <Dashboard trades={dashboardTrades} pairs={pairs} theme={theme} isSampleMode={isSampleMode} onRecordCta={() => setTab('record')} />}
         {tab === "weekly" && <WeeklyNotes notes={notes} onAdd={handleAddNote} onDelete={confirmDeleteNote} />}
         {tab === "monthly" && <MonthlyNotes notes={monthlyNotes} onAdd={handleAddMonthlyNote} onDelete={confirmDeleteMonthlyNote} />}
         {tab === "policy" && <Policies policies={policies} setPolicies={setPolicies} storeAdapter={storeAdapter} />}

@@ -244,6 +244,10 @@ export const en = {
     success: 'Synced.',
     error: 'Sync failed. Your local data is safe; we will retry on next sign-in.',
   },
+  demo: {
+    banner: 'You are viewing sample data. Log your first trade in the Record tab to replace it with your own.',
+    recordCta: 'Log your first trade',
+  },
   filter: {
     title: 'Filter',
     all: 'All',

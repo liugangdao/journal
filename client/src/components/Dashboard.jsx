@@ -31,7 +31,7 @@ function isoWeek(dateStr) {
   return `${d.getFullYear()}-W${String(weekNum).padStart(2, '0')}`
 }
 
-export default function Dashboard({ trades, pairs = [], theme = 'dark' }) {
+export default function Dashboard({ trades, pairs = [], theme = 'dark', isSampleMode = false, onRecordCta }) {
   const pairsByName = useMemo(() => new Map(pairs.map((p) => [p.name, p])), [pairs])
   const stats = useMemo(() => calcStats(trades, pairsByName), [trades, pairsByName])
   const C = THEME_COLORS[theme] || THEME_COLORS.dark
@@ -70,6 +70,20 @@ export default function Dashboard({ trades, pairs = [], theme = 'dark' }) {
 
   return (
     <div className="space-y-6">
+      {isSampleMode && (
+        <div className="flex items-center justify-between gap-4 bg-amber-500/10 border border-amber-500/40 text-amber-600 dark:text-amber-400 rounded-xl px-4 py-3 text-sm">
+          <span>{en.demo.banner}</span>
+          {onRecordCta && (
+            <button
+              type="button"
+              onClick={onRecordCta}
+              className="shrink-0 bg-amber-500 text-neutral-950 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer hover:bg-amber-400 transition-colors"
+            >
+              {en.demo.recordCta}
+            </button>
+          )}
+        </div>
+      )}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:flex gap-2 sm:gap-3">
         <div className="flex-1 min-w-[140px] animate-fade-in-up" style={{ animationDelay: '0ms' }}>
           <KpiCard label={en.stats.tradeCount} value={stats.tradeCount}
