@@ -4,9 +4,9 @@
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "cd client && npm run dev",
-    "dev:server": "cd server && node --watch index.js",
+    "dev:server": "cd server && tsx watch index.js",
     "build": "cd client && npm run build",
-    "start": "cd server && node index.js",
+    "start": "cd server && tsx index.js",
     "install:all": "npm install && cd client && npm install && cd ../server && npm install",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -14,6 +14,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
+    "tsx": "^4.21.0",
     "vitest": "^4.1.4"
   }
 }
