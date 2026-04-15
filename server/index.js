@@ -13,6 +13,7 @@ import monthlyNotesRouter from './routes/monthly-notes.js'
 import pairsRouter from './routes/pairs.js'
 import policiesRouter from './routes/policies.js'
 import violationsRouter from './routes/violations.js'
+import migrateRouter from './routes/migrate.js'
 import healthRouter from './routes/health.js'
 import requireAuth from './middleware/requireAuth.js'
 import { globalApiLimiter } from './middleware/rateLimit.js'
@@ -58,6 +59,7 @@ app.use('/api/notes', requireAuth, notesRouter)
 app.use('/api/monthly-notes', requireAuth, monthlyNotesRouter)
 app.use('/api/pairs', requireAuth, pairsRouter)
 app.use('/api/policies', requireAuth, policiesRouter)
+app.use('/api/migrate', requireAuth, migrateRouter)
 app.use('/api', requireAuth, violationsRouter)
 
 // Static SPA fallback (Plan 2 wires the built client into public/)
