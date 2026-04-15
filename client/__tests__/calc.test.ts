@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { calcTrade } from '../src/lib/tradeCalc'
-import type { Trade, Pair } from '../src/stores/types'
+import { calcTrade, calcStats } from '../src/lib/tradeCalc'
+import type { Trade, Pair, TradeRow } from '../src/stores/types'
 
 const eurusd: Pair = {
   name: 'EUR/USD',
@@ -182,5 +182,58 @@ describe('calcTrade — crypto perp', () => {
       status: 'closed',
     } as unknown as Trade
     expect(() => calcTrade(trade, btc)).toThrow(/direction/i)
+  })
+})
+
+describe('calcStats aggregation', () => {
+  it('returns null for empty input', () => {
+    expect(calcStats([], new Map())).toBeNull()
+  })
+
+  it('computes win rate, profit factor, and total P&L across asset classes', () => {
+    const pairsByName = new Map<string, Pair>([
+      ['EUR/USD', eurusd],
+      ['BTC/USDT', btc],
+    ])
+    const trades: TradeRow[] = [
+      {
+        external_id: 't1',
+        open_time: '2026-04-10T10:00',
+        pair: 'EUR/USD',
+        asset_class: 'forex',
+        direction: 'long',
+        strategy: 'trend',
+        timeframe: 'H4',
+        lots: 1,
+        entry: 1.1,
+        stop: 1.095,
+        exit_price: 1.105,
+        gross_pnl: 500,
+        status: 'closed',
+      },
+      {
+        external_id: 't2',
+        open_time: '2026-04-11T10:00',
+        pair: 'BTC/USDT',
+        asset_class: 'crypto_perp',
+        direction: 'long',
+        strategy: 'breakout',
+        timeframe: 'H1',
+        quantity: 1,
+        entry: 60000,
+        stop: 58000,
+        exit_price: 62000,
+        gross_pnl: -200,
+        status: 'closed',
+      },
+    ]
+    const stats = calcStats(trades, pairsByName)
+    expect(stats).not.toBeNull()
+    expect(stats!.tradeCount).toBe(2)
+    expect(stats!.winCount).toBe(1)
+    expect(stats!.lossCount).toBe(1)
+    expect(stats!.winRate).toBeCloseTo(50, 0)
+    expect(stats!.totalNet).toBeCloseTo(300, 0)
+    expect(stats!.cumPnl).toHaveLength(2)
   })
 })

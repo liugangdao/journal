@@ -5,7 +5,7 @@ import Disclosure from './ui/Disclosure'
 import EmptyState from './EmptyState'
 import StreakKpis from './StreakKpis'
 import WeeklyTrend from './WeeklyTrend'
-import { calcStats } from '../lib/calc'
+import { calcStats } from '../lib/tradeCalc'
 import { api } from '../hooks/useApi'
 
 const THEME_COLORS = {
@@ -33,8 +33,9 @@ function getComparison(current, previous) {
   return { value: typeof previous === 'number' && previous % 1 !== 0 ? previous.toFixed(2) : previous, direction }
 }
 
-export default function Dashboard({ trades, spreadCostMap, theme = 'dark' }) {
-  const stats = useMemo(() => calcStats(trades, spreadCostMap), [trades, spreadCostMap])
+export default function Dashboard({ trades, pairs = [], theme = 'dark' }) {
+  const pairsByName = useMemo(() => new Map(pairs.map((p) => [p.name, p])), [pairs])
+  const stats = useMemo(() => calcStats(trades, pairsByName), [trades, pairsByName])
   const C = THEME_COLORS[theme] || THEME_COLORS.dark
   const [violationStats, setViolationStats] = useState(null)
   useEffect(() => {
@@ -55,8 +56,8 @@ export default function Dashboard({ trades, spreadCostMap, theme = 'dark' }) {
     trades.filter(t => t.status === 'closed' && t.open_time && isoWeek(t.open_time) === lastWeek),
     [trades, lastWeek]
   )
-  const thisWeekStats = useMemo(() => calcStats(thisWeekTrades, spreadCostMap), [thisWeekTrades, spreadCostMap])
-  const lastWeekStats = useMemo(() => calcStats(lastWeekTrades, spreadCostMap), [lastWeekTrades, spreadCostMap])
+  const thisWeekStats = useMemo(() => calcStats(thisWeekTrades, pairsByName), [thisWeekTrades, pairsByName])
+  const lastWeekStats = useMemo(() => calcStats(lastWeekTrades, pairsByName), [lastWeekTrades, pairsByName])
 
   const showComparison = thisWeekStats && lastWeekStats
 

@@ -3,11 +3,12 @@ import KpiCard from './ui/KpiCard'
 import Select from './ui/Select'
 import Input from './ui/Input'
 import { DIRECTIONS } from '../lib/constants'
-import { calcStats } from '../lib/calc'
+import { calcStats } from '../lib/tradeCalc'
 
 const today = () => new Date().toISOString().split("T")[0]
 
-export default function PsychologyPanel({ trades, pairs, spreadCostMap, onAddMissed, onDeleteTrade }) {
+export default function PsychologyPanel({ trades, pairs, onAddMissed, onDeleteTrade }) {
+  const pairsByName = useMemo(() => new Map((pairs ?? []).map((p) => typeof p === 'object' ? [p.name, p] : [p, { name: p, asset_class: 'forex', contract_size: 100000, price_precision: 5, spread_cost: 0 }])), [pairs])
   const [showMissedForm, setShowMissedForm] = useState(false)
   const [showMissedList, setShowMissedList] = useState(false)
   const [missedForm, setMissedForm] = useState({ open_time: today() + 'T00:00', pair: pairs[0] || '', direction: '多(Buy)', notes: '' })
@@ -30,9 +31,9 @@ export default function PsychologyPanel({ trades, pairs, spreadCostMap, onAddMis
 
   // Win rate from closed trades
   const closedTrades = useMemo(() => trades.filter(t => t.status === 'closed'), [trades])
-  const stats = useMemo(() => calcStats(closedTrades, spreadCostMap), [closedTrades, spreadCostMap])
-  const winRate = stats ? stats.winRate : 0
-  const totalClosed = stats ? stats.total : 0
+  const stats = useMemo(() => calcStats(closedTrades, pairsByName), [closedTrades, pairsByName])
+  const winRate = stats ? Math.round(stats.winRate) : 0
+  const totalClosed = stats ? stats.tradeCount : 0
 
   // Today's missed trades
   const todayMissed = useMemo(() =>
