@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import Layout from './components/Layout'
 import LandingPage from './components/LandingPage'
-import AuthPage from './components/AuthPage'
 import TradeForm, { emptyTrade } from './components/TradeForm'
 import TradeTable from './components/TradeTable'
 import Dashboard from './components/Dashboard'
@@ -22,15 +21,12 @@ import { useTheme } from './hooks/useTheme'
 import { ToastProvider, useToast } from './components/ui/Toast'
 import { SkeletonKpi, SkeletonCard, SkeletonChart } from './components/ui/Skeleton'
 import ConfirmDialog from './components/ui/ConfirmDialog'
-import { useTelegram, tg } from './hooks/useTelegram'
-import QuotaBanner from './components/QuotaBanner'
-import UpgradeModal from './components/UpgradeModal'
+
 
 function AppContent() {
   // Auth state: null = checking, false = logged out, object = logged in
   const [authUser, setAuthUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
-  const [showAuth, setShowAuth] = useState(false)
 
   const [allTrades, setAllTrades] = useState([])
   const [pagedTrades, setPagedTrades] = useState([])
@@ -49,40 +45,24 @@ function AppContent() {
   const { theme, toggleTheme } = useTheme()
   const toast = useToast()
   const [confirmState, setConfirmState] = useState({ open: false, id: null, type: null })
-  const isTelegram = useTelegram()
-  const [quota, setQuota] = useState(null)
-  const [showUpgrade, setShowUpgrade] = useState(false)
 
   // Check auth on mount
   useEffect(() => {
-    if (isTelegram) {
-      api.telegramAuth()
-        .then(user => {
-          setAuthUser(user || false)
-          setAuthChecked(true)
-        })
-        .catch(() => {
-          setAuthUser(false)
-          setAuthChecked(true)
-        })
-    } else {
-      api.getMe()
-        .then(user => {
-          setAuthUser(user || false)
-          setAuthChecked(true)
-        })
-        .catch(() => {
-          setAuthUser(false)
-          setAuthChecked(true)
-        })
-    }
-  }, [isTelegram])
+    api.getMe()
+      .then(user => {
+        setAuthUser(user || false)
+        setAuthChecked(true)
+      })
+      .catch(() => {
+        setAuthUser(false)
+        setAuthChecked(true)
+      })
+  }, [])
 
   // Set 401 handler to log user out
   useEffect(() => {
     api.setUnauthorizedHandler(() => {
       setAuthUser(false)
-      setShowAuth(false)
     })
   }, [])
 
@@ -114,18 +94,6 @@ function AppContent() {
     setLoading(true)
     Promise.all([reloadData(), fetchPagedTrades(tradeFilter)]).finally(() => setLoading(false))
   }, [authUser, reloadData, fetchPagedTrades])
-
-  // Fetch quota when authenticated in TG
-  useEffect(() => {
-    if (!authUser || !isTelegram) return
-    api.getQuota().then(setQuota).catch(console.error)
-  }, [authUser, isTelegram])
-
-  // Auth handlers
-  const handleAuth = useCallback((user) => {
-    setAuthUser(user)
-    setShowAuth(false)
-  }, [])
 
   const handleLogout = useCallback(async () => {
     try {
@@ -172,17 +140,9 @@ function AppContent() {
         await api.updateTradeViolations(editing, violations || [])
         setEditing(null)
       } else {
-        try {
-          const created = await api.createTrade(tradeData)
-          if (violations && violations.length > 0) {
-            await api.updateTradeViolations(created.id, violations)
-          }
-        } catch (err) {
-          if (err.message.includes('免费额度已用完')) {
-            setShowUpgrade(true)
-            return
-          }
-          throw err
+        const created = await api.createTrade(tradeData)
+        if (violations && violations.length > 0) {
+          await api.updateTradeViolations(created.id, violations)
         }
       }
       setShowForm(false)
@@ -190,12 +150,11 @@ function AppContent() {
       reloadData()
       fetchPagedTrades(tradeFilter, tradePagination.offset)
       toast.success(editing ? '交易已更新' : '交易已记录')
-      if (isTelegram) api.getQuota().then(setQuota).catch(console.error)
     } catch (err) {
       console.error(err)
       toast.error('操作失败，请重试')
     }
-  }, [editing, toast, isTelegram])
+  }, [editing, toast])
 
   const handleCloseTrade = useCallback((trade) => {
     setClosingId(trade.id)
@@ -355,19 +314,9 @@ function AppContent() {
     )
   }
 
-  // Not logged in - show landing or auth
+  // Not logged in - show landing
   if (!authUser) {
-    if (isTelegram) {
-      return (
-        <div className="min-h-screen bg-bg flex items-center justify-center text-muted">
-          正在连接 Telegram...
-        </div>
-      )
-    }
-    if (showAuth) {
-      return <AuthPage onAuth={handleAuth} onBack={() => setShowAuth(false)} theme={theme} onToggleTheme={toggleTheme} />
-    }
-    return <LandingPage onNavigateAuth={() => setShowAuth(true)} theme={theme} onToggleTheme={toggleTheme} />
+    return <LandingPage onNavigateAuth={() => {}} theme={theme} onToggleTheme={toggleTheme} />
   }
 
   // Logged in - loading data
@@ -401,7 +350,6 @@ function AppContent() {
     switch (tab) {
       case 'record': return (
         <div>
-          {isTelegram && quota && <QuotaBanner quota={quota} onUpgrade={() => setShowUpgrade(true)} />}
           <TradeFilter filter={tradeFilter} onChange={handleFilterChange} pairs={pairNames} />
           <PsychologyPanel
             trades={allTrades}
@@ -445,17 +393,7 @@ function AppContent() {
       mobileTabContent={mobileTabContent}
       overlays={
         <>
-          {!isTelegram && <PwaPrompt />}
-          <UpgradeModal
-            open={showUpgrade}
-            onClose={() => setShowUpgrade(false)}
-            quota={quota}
-            onPaid={() => {
-              setShowUpgrade(false)
-              api.getQuota().then(setQuota).catch(console.error)
-              if (isTelegram) api.telegramAuth().then(setAuthUser).catch(console.error)
-            }}
-          />
+          <PwaPrompt />
           <ConfirmDialog
             open={confirmState.open}
             title="确认删除"
@@ -470,7 +408,6 @@ function AppContent() {
       <div key={tab} className="tab-enter">
         {tab === "record" && (
           <div>
-            {isTelegram && quota && <QuotaBanner quota={quota} onUpgrade={() => setShowUpgrade(true)} />}
             <TradeFilter filter={tradeFilter} onChange={handleFilterChange} pairs={pairNames} />
             <ExportBar onImported={reloadData} />
             <PsychologyPanel
