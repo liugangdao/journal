@@ -1,6 +1,8 @@
+import { en } from '../../i18n/en'
+
 export default function Pagination({ total, limit, offset, onChange }) {
   if (!limit || total <= limit) {
-    return total > 0 ? <div className="mt-4 text-xs text-muted">共 {total} 条记录</div> : null
+    return total > 0 ? <div className="mt-4 text-xs text-muted">{total} {en.pagination.total}</div> : null
   }
 
   const totalPages = Math.ceil(total / limit)
@@ -25,7 +27,7 @@ export default function Pagination({ total, limit, offset, onChange }) {
 
   return (
     <div className="flex items-center justify-between mt-4 text-sm text-muted">
-      <span className="text-xs">共 {total} 笔交易</span>
+      <span className="text-xs">{total} {en.pagination.total}</span>
       <div className="flex items-center gap-1">
         <button
           onClick={() => goTo(currentPage - 1)}
@@ -58,7 +60,7 @@ export default function Pagination({ total, limit, offset, onChange }) {
             disabled:opacity-30 disabled:cursor-not-allowed"
         >›</button>
       </div>
-      <span className="text-xs hidden sm:inline">每页 {limit} 笔</span>
+      <span className="text-xs hidden sm:inline">{limit} / {en.pagination.page}</span>
     </div>
   )
 }

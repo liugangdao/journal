@@ -27,7 +27,7 @@ export default function KpiCard({ label, value, color, sub, comparison }) {
           comparison.direction === 'up' ? 'text-green' :
           comparison.direction === 'down' ? 'text-red' : 'text-muted'
         }`}>
-          {comparison.direction === 'up' ? '↑' : comparison.direction === 'down' ? '↓' : '→'} vs上周 {comparison.value}
+          {comparison.direction === 'up' ? '↑' : comparison.direction === 'down' ? '↓' : '→'} vs last week {comparison.value}
         </div>
       )}
       {!comparison && sub && <div className="text-[10px] text-muted mt-1">{sub}</div>}

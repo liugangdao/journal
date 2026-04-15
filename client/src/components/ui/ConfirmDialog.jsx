@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { AlertTriangle } from 'lucide-react'
+import { en } from '../../i18n/en'
 
-export default function ConfirmDialog({ open, title, message, confirmText = '确认删除', onConfirm, onCancel }) {
+export default function ConfirmDialog({ open, title, message, confirmText = en.confirm.confirm, onConfirm, onCancel }) {
   const [closing, setClosing] = useState(false)
   const [visible, setVisible] = useState(false)
 
@@ -38,7 +39,7 @@ export default function ConfirmDialog({ open, title, message, confirmText = '确
           <button onClick={onCancel}
             className="text-muted border border-border px-4 py-2 rounded-lg text-sm cursor-pointer
               hover:text-text hover:border-muted transition-all duration-200">
-            取消
+            {en.common.cancel}
           </button>
           <button onClick={onConfirm}
             className="bg-red text-white px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer

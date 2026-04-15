@@ -130,10 +130,10 @@ function AppContent() {
       setEditViolations([])
       reloadData()
       fetchPagedTrades(tradeFilter, tradePagination.offset)
-      toast.success(editing ? '交易已更新' : '交易已记录')
+      toast.success(editing ? en.toasts.tradeUpdated : en.toasts.tradeCreated)
     } catch (err) {
       console.error(err)
-      toast.error('操作失败，请重试')
+      toast.error(en.toasts.opFailed)
     }
   }, [editing, toast, storeAdapter])
 
@@ -152,10 +152,10 @@ function AppContent() {
       setShowForm(false)
       reloadData()
       fetchPagedTrades(tradeFilter, tradePagination.offset)
-      toast.success('已平仓')
+      toast.success(en.toasts.tradeClosed)
     } catch (err) {
       console.error(err)
-      toast.error('平仓失败，请重试')
+      toast.error(en.toasts.closeFailed)
     }
   }, [closingId, toast, storeAdapter])
 
@@ -178,10 +178,10 @@ function AppContent() {
       await storeAdapter.deleteTrade(id)
       reloadData()
       fetchPagedTrades(tradeFilter, tradePagination.offset)
-      toast.success('已删除')
+      toast.success(en.toasts.tradeDeleted)
     } catch (err) {
       console.error(err)
-      toast.error('删除失败，请重试')
+      toast.error(en.toasts.deleteFailed)
     }
   }, [toast, storeAdapter])
 
@@ -204,10 +204,10 @@ function AppContent() {
       await storeAdapter.createTrade(form)
       reloadData()
       fetchPagedTrades(tradeFilter, tradePagination.offset)
-      toast.success('踏空记录已添加')
+      toast.success(en.toasts.missedAdded)
     } catch (err) {
       console.error(err)
-      toast.error('记录失败，请重试')
+      toast.error(en.toasts.opFailed)
     }
   }, [toast, storeAdapter])
 
@@ -216,10 +216,10 @@ function AppContent() {
     try {
       const created = await storeAdapter.createNote(form)
       setNotes(prev => [created, ...prev])
-      toast.success('笔记已保存')
+      toast.success(en.toasts.noteSaved)
     } catch (err) {
       console.error(err)
-      toast.error('保存失败，请重试')
+      toast.error(en.toasts.saveFailed)
     }
   }, [toast, storeAdapter])
 
@@ -227,10 +227,10 @@ function AppContent() {
     try {
       await storeAdapter.deleteNote(id)
       setNotes(prev => prev.filter(n => n.id !== id))
-      toast.success('已删除')
+      toast.success(en.toasts.tradeDeleted)
     } catch (err) {
       console.error(err)
-      toast.error('删除失败，请重试')
+      toast.error(en.toasts.deleteFailed)
     }
   }, [toast, storeAdapter])
 
@@ -239,10 +239,10 @@ function AppContent() {
     try {
       const created = await storeAdapter.createMonthlyNote(form)
       setMonthlyNotes(prev => [created, ...prev])
-      toast.success('笔记已保存')
+      toast.success(en.toasts.noteSaved)
     } catch (err) {
       console.error(err)
-      toast.error('保存失败，请重试')
+      toast.error(en.toasts.saveFailed)
     }
   }, [toast, storeAdapter])
 
@@ -250,10 +250,10 @@ function AppContent() {
     try {
       await storeAdapter.deleteMonthlyNote(id)
       setMonthlyNotes(prev => prev.filter(n => n.id !== id))
-      toast.success('已删除')
+      toast.success(en.toasts.tradeDeleted)
     } catch (err) {
       console.error(err)
-      toast.error('删除失败，请重试')
+      toast.error(en.toasts.deleteFailed)
     }
   }, [toast, storeAdapter])
 
@@ -290,7 +290,7 @@ function AppContent() {
   if (storeLoading) {
     return (
       <div className="min-h-screen bg-bg flex items-center justify-center text-muted">
-        加载中...
+        {en.common.loading}
       </div>
     )
   }
@@ -372,8 +372,8 @@ function AppContent() {
           <PwaPrompt />
           <ConfirmDialog
             open={confirmState.open}
-            title="确认删除"
-            message="删除后无法恢复，确定要继续吗？"
+            title={en.confirm.deleteTitle}
+            message={en.confirm.deleteMessage}
             onConfirm={handleConfirmDelete}
             onCancel={cancelDelete}
           />
@@ -406,7 +406,7 @@ function AppContent() {
                 onClick={() => { setEditing(null); setClosingId(null); setShowForm(true) }}
                 className="bg-accent text-white px-6 py-3 rounded-xl text-sm font-semibold cursor-pointer
                   hover:brightness-110 transition-all duration-200 mb-5">
-                + 记录交易
+                + {en.trade.recordTitle}
               </button>
             )}
             {showForm && (
