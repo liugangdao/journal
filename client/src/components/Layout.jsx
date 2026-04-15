@@ -1,7 +1,6 @@
 import { Sun, Moon } from 'lucide-react'
 import Tab from './ui/Tab'
 import MobileLayout from './MobileLayout'
-import { useTelegram } from '../hooks/useTelegram'
 
 function ThemeToggle({ theme, onToggle }) {
   return (
@@ -16,7 +15,7 @@ function ThemeToggle({ theme, onToggle }) {
 }
 
 export default function Layout({
-  tab, setTab, tradeCount, openCount, theme, onToggleTheme, user, onLogout, children,
+  tab, setTab, tradeCount, openCount, theme, onToggleTheme, user, signInSlot, onLogout, children,
   // Mobile-specific props
   showForm, formMode, formInitial, onNewTrade, onFormSubmit, onFormCancel,
   pairs, policies, editViolations, editing, closingId,
@@ -25,7 +24,6 @@ export default function Layout({
   // Global overlays rendered outside responsive containers
   overlays,
 }) {
-  const isTelegram = useTelegram()
   return (
     <>
       {/* Mobile layout — hidden on sm+ */}
@@ -63,9 +61,10 @@ export default function Layout({
                   <Tab active={tab === "settings"} onClick={() => setTab("settings")}>设置</Tab>
                 </div>
                 <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-                {user && !isTelegram && (
+                {signInSlot}
+                {user && (
                   <div className="flex items-center gap-2 ml-1">
-                    <span className="text-xs text-muted hidden sm:inline">{user.display_name || user.username}</span>
+                    <span className="text-xs text-muted hidden sm:inline">{user.email || user.display_name || user.username}</span>
                     <button
                       onClick={onLogout}
                       className="text-xs text-muted hover:text-red transition-colors cursor-pointer px-2 py-1 rounded-md hover:bg-hover"

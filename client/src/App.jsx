@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import Layout from './components/Layout'
-import LandingPage from './components/LandingPage'
 import TradeForm, { emptyTrade } from './components/TradeForm'
 import TradeTable from './components/TradeTable'
 import Dashboard from './components/Dashboard'
@@ -299,11 +298,6 @@ function AppContent() {
     )
   }
 
-  // Not logged in - show landing
-  if (!isAuthenticated) {
-    return <LandingPage onNavigateAuth={() => {}} theme={theme} onToggleTheme={toggleTheme} />
-  }
-
   // Logged in - loading data
   if (loading) {
     return (
@@ -368,7 +362,7 @@ function AppContent() {
   return (
     <Layout
       tab={tab} setTab={setTab} tradeCount={closedTrades.length} openCount={openTrades.length}
-      theme={theme} onToggleTheme={toggleTheme} user={isAuthenticated ? { email: userEmail } : null} onLogout={handleLogout}
+      theme={theme} onToggleTheme={toggleTheme} user={isAuthenticated ? { email: userEmail } : null} signInSlot={!isAuthenticated ? <SignInButton /> : null} onLogout={handleLogout}
       // Mobile sheet props
       showForm={showForm} formMode={formMode} formInitial={formInitial}
       onNewTrade={handleNewTrade} onFormSubmit={closingId ? handleCloseSubmit : handleAddTrade}
@@ -390,6 +384,12 @@ function AppContent() {
       }
     >
       {/* Desktop tab content */}
+      {migrationStatus === 'running' && (
+        <div className="bg-amber-500 text-neutral-950 px-4 py-2 text-sm rounded mb-4">{en.migration.running}</div>
+      )}
+      {migrationStatus === 'error' && (
+        <div className="bg-red-500 text-white px-4 py-2 text-sm rounded mb-4">{en.migration.error}</div>
+      )}
       <div key={tab} className="tab-enter">
         {tab === "record" && (
           <div>
