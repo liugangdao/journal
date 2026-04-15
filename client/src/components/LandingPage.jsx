@@ -1,192 +1,143 @@
+import { useState } from 'react'
+import { ArrowRight, BookOpen, BarChart3, ShieldCheck, Lock, Sun, Moon } from 'lucide-react'
+import Dashboard from './Dashboard'
+import SignInDialog from './SignInDialog'
+import { SAMPLE_TRADES } from '../lib/sampleTrades'
+import { DEFAULT_PAIRS } from '../lib/defaults'
+import { useTheme } from '../hooks/useTheme'
+import { en } from '../i18n/en'
+
 function ThemeToggle({ theme, onToggle }) {
   return (
     <button
       onClick={onToggle}
-      className="p-2 rounded-full text-muted hover:text-text hover:bg-hover transition-all duration-300 cursor-pointer"
-      title={theme === 'dark' ? '切换到亮色' : '切换到暗色'}
+      className="p-2 rounded-lg text-muted hover:text-text hover:bg-hover transition-all duration-200 cursor-pointer"
+      aria-label={theme === 'dark' ? en.more.themeLight : en.more.themeDark}
     >
-      {theme === 'dark' ? (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
-          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-          <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
-          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-        </svg>
-      ) : (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-        </svg>
-      )}
+      {theme === 'dark' ? <Sun size={18} strokeWidth={1.8} /> : <Moon size={18} strokeWidth={1.8} />}
     </button>
   )
 }
 
-export default function LandingPage({ onNavigateAuth, theme, onToggleTheme }) {
-  const features = [
-    {
-      icon: (
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M3 3v18h18" /><path d="M7 16l4-8 4 4 5-9" />
-        </svg>
-      ),
-      title: '数据面板',
-      desc: '胜率、盈亏比、R倍数分析，一目了然',
-    },
-    {
-      icon: (
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 20V10" /><path d="M18 20V4" /><path d="M6 20v-4" />
-        </svg>
-      ),
-      title: '交易记录',
-      desc: '精确记录每笔交易，自动计算关键指标',
-    },
-    {
-      icon: (
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-        </svg>
-      ),
-      title: '纪律管理',
-      desc: '交易规则追踪，违规记录可视化',
-    },
-    {
-      icon: (
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-          <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-        </svg>
-      ),
-      title: '复盘系统',
-      desc: '周度月度复盘，持续优化交易策略',
-    },
-  ]
+function FeatureCard({ icon: Icon, title, body }) {
+  return (
+    <div className="bg-card border border-border rounded-2xl p-6 hover:border-accent/40 transition-colors">
+      <div className="w-10 h-10 rounded-xl bg-accent/10 text-accent flex items-center justify-center mb-4">
+        <Icon size={20} strokeWidth={1.8} />
+      </div>
+      <h3 className="text-base font-semibold mb-2">{title}</h3>
+      <p className="text-sm text-muted leading-relaxed">{body}</p>
+    </div>
+  )
+}
+
+export default function LandingPage() {
+  const { theme, toggleTheme } = useTheme()
+  const [signInOpen, setSignInOpen] = useState(false)
+  const goToApp = () => { window.location.href = '/app' }
 
   return (
-    <div className="min-h-screen bg-bg text-text font-sans overflow-hidden">
-
-      {/* Nav */}
-      <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-2xl bg-header-bg border-b border-border/50 animate-fade-in">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-accent/10 flex items-center justify-center">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--c-accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 20V10" /><path d="M18 20V4" /><path d="M6 20v-4" />
-              </svg>
-            </div>
-            <span className="text-sm font-semibold tracking-tight">交易日志</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+    <div className="min-h-screen bg-bg text-text font-sans">
+      {/* Header */}
+      <header className="sticky top-0 z-40 backdrop-blur-xl bg-header-bg/80 border-b border-border">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-3">
+          <a href="/" className="flex items-baseline gap-2 cursor-pointer group">
+            <span className="text-lg font-bold tracking-tight group-hover:text-accent transition-colors">{en.app.titleShort}</span>
+            <span className="hidden sm:inline text-[11px] text-muted">{en.app.tagline}</span>
+          </a>
+          <div className="flex items-center gap-2">
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
             <button
-              onClick={onNavigateAuth}
-              className="text-xs text-muted hover:text-text transition-colors duration-300 cursor-pointer px-3 py-1.5 rounded-full hover:bg-hover"
+              onClick={() => setSignInOpen(true)}
+              className="text-sm text-muted hover:text-text px-3 py-1.5 rounded-lg hover:bg-hover transition-colors cursor-pointer"
             >
-              登录 / 注册
+              {en.landing.navSignIn}
+            </button>
+            <button
+              onClick={goToApp}
+              className="text-sm font-semibold bg-accent text-white px-4 py-1.5 rounded-lg hover:brightness-110 transition-all cursor-pointer"
+            >
+              {en.landing.navTryFree}
             </button>
           </div>
         </div>
-      </nav>
+      </header>
 
       {/* Hero */}
-      <section className="relative max-w-3xl mx-auto px-6 pt-32 pb-12 sm:pt-44 sm:pb-20 text-center">
-        {/* Background glow */}
-        <div
-          className="absolute top-20 left-1/2 -translate-x-1/2 w-[500px] h-[300px] rounded-full animate-glow-pulse pointer-events-none"
-          style={{
-            background: 'radial-gradient(ellipse, var(--c-accent) 0%, transparent 70%)',
-            opacity: 0.08,
-            filter: 'blur(60px)',
-          }}
-        />
-
-        <p className="animate-fade-up text-xs font-medium tracking-[0.2em] uppercase text-accent mb-6">
-          Trading Journal
-        </p>
-
-        <h1 className="animate-fade-up delay-100 text-4xl sm:text-6xl font-bold tracking-tight leading-[1.1]">
-          记录交易
-          <br />
-          <span className="bg-gradient-to-r from-accent to-purple bg-clip-text text-transparent">
-            精进策略
-          </span>
+      <section className="max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-24 text-center">
+        <div className="inline-block text-xs font-semibold tracking-wider text-accent uppercase mb-4">
+          {en.landing.heroEyebrow}
+        </div>
+        <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold tracking-tight mb-6 max-w-4xl mx-auto leading-tight">
+          {en.landing.heroTitle}
         </h1>
-
-        <p className="animate-fade-up delay-200 mt-6 text-muted text-sm sm:text-base max-w-md mx-auto leading-relaxed">
-          为认真对待交易的人打造。
-          <br />
-          记录、分析、复盘，让每一笔交易都有意义。
+        <p className="text-base sm:text-lg text-muted max-w-2xl mx-auto mb-8 leading-relaxed">
+          {en.landing.heroSubtitle}
         </p>
-
-        <div className="animate-fade-up delay-300 mt-10 flex items-center justify-center gap-3">
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
           <button
-            onClick={onNavigateAuth}
-            className="group relative bg-accent text-white px-7 py-2.5 rounded-full text-sm font-medium cursor-pointer
-              transition-all duration-300 hover:shadow-lg hover:shadow-accent/25 hover:scale-[1.02] active:scale-[0.98]"
+            onClick={goToApp}
+            className="group bg-accent text-white px-7 py-3.5 rounded-xl text-base font-semibold cursor-pointer hover:brightness-110 transition-all duration-200 flex items-center gap-2"
           >
-            开始使用
-            <svg className="inline-block ml-1.5 w-3.5 h-3.5 transition-transform duration-300 group-hover:translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M5 12h14" /><path d="M12 5l7 7-7 7" />
-            </svg>
+            {en.landing.heroCta}
+            <ArrowRight size={18} className="group-hover:translate-x-0.5 transition-transform" />
           </button>
         </div>
-      </section>
-
-      {/* Stats bar */}
-      <section className="animate-fade-up delay-400 max-w-2xl mx-auto px-6 pb-16 sm:pb-24">
-        <div className="flex items-center justify-center gap-8 sm:gap-16 text-center">
-          {[
-            { value: '外汇', label: 'Forex' },
-            { value: '贵金属', label: 'Metals' },
-            { value: '能源', label: 'Energy' },
-            { value: '全品种', label: 'Coverage' },
-          ].map((s) => (
-            <div key={s.label}>
-              <div className="text-sm sm:text-base font-semibold">{s.value}</div>
-              <div className="text-[10px] text-muted mt-0.5 tracking-wide uppercase">{s.label}</div>
-            </div>
-          ))}
-        </div>
+        <p className="text-xs text-muted mt-4">{en.landing.heroCtaSub}</p>
       </section>
 
       {/* Features */}
-      <section className="max-w-3xl mx-auto px-6 pb-20 sm:pb-32">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-          {features.map((f, i) => (
-            <div
-              key={f.title}
-              className={`animate-fade-up delay-${(i + 4) * 100} group bg-card/60 backdrop-blur-sm border border-border/60 rounded-2xl p-5
-                hover:border-accent/20 hover:bg-card transition-all duration-500 hover:-translate-y-1`}
-            >
-              <div className="text-muted group-hover:text-accent transition-colors duration-500 mb-4">
-                {f.icon}
-              </div>
-              <h3 className="font-semibold text-xs mb-1.5 tracking-tight">{f.title}</h3>
-              <p className="text-muted text-[11px] leading-relaxed">{f.desc}</p>
-            </div>
-          ))}
+      <section className="max-w-6xl mx-auto px-4 sm:px-6 py-12">
+        <h2 className="text-2xl sm:text-3xl font-bold text-center mb-10">{en.landing.featuresTitle}</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <FeatureCard icon={BookOpen} title={en.landing.feature1Title} body={en.landing.feature1Body} />
+          <FeatureCard icon={BarChart3} title={en.landing.feature2Title} body={en.landing.feature2Body} />
+          <FeatureCard icon={ShieldCheck} title={en.landing.feature3Title} body={en.landing.feature3Body} />
+          <FeatureCard icon={Lock} title={en.landing.feature4Title} body={en.landing.feature4Body} />
         </div>
       </section>
 
-      {/* CTA */}
-      <section className="animate-fade-up delay-700 max-w-3xl mx-auto px-6 pb-20 sm:pb-28 text-center">
-        <div className="bg-card/40 backdrop-blur-sm border border-border/40 rounded-3xl py-12 px-8">
-          <p className="text-lg sm:text-xl font-semibold tracking-tight mb-2">准备好了吗？</p>
-          <p className="text-muted text-sm mb-6">免费注册，即刻开始你的交易复盘之旅</p>
-          <button
-            onClick={onNavigateAuth}
-            className="bg-accent text-white px-7 py-2.5 rounded-full text-sm font-medium cursor-pointer
-              transition-all duration-300 hover:shadow-lg hover:shadow-accent/25 hover:scale-[1.02] active:scale-[0.98]"
-          >
-            免费注册
-          </button>
+      {/* Live demo dashboard */}
+      <section className="max-w-6xl mx-auto px-4 sm:px-6 py-16">
+        <div className="text-center mb-8">
+          <h2 className="text-2xl sm:text-3xl font-bold mb-3">{en.landing.demoTitle}</h2>
+          <p className="text-sm text-muted max-w-xl mx-auto">{en.landing.demoSubtitle}</p>
         </div>
+        <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 shadow-lg">
+          <Dashboard
+            trades={SAMPLE_TRADES}
+            pairs={DEFAULT_PAIRS}
+            theme={theme}
+          />
+        </div>
+      </section>
+
+      {/* Bottom CTA */}
+      <section className="max-w-3xl mx-auto px-4 sm:px-6 py-16 text-center">
+        <h2 className="text-2xl sm:text-3xl font-bold mb-3">{en.landing.ctaTitle}</h2>
+        <p className="text-sm text-muted mb-6">{en.landing.ctaSubtitle}</p>
+        <button
+          onClick={goToApp}
+          className="group bg-accent text-white px-7 py-3.5 rounded-xl text-base font-semibold cursor-pointer hover:brightness-110 transition-all duration-200 inline-flex items-center gap-2"
+        >
+          {en.landing.ctaButton}
+          <ArrowRight size={18} className="group-hover:translate-x-0.5 transition-transform" />
+        </button>
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-border/40 py-8 text-center">
-        <p className="text-[10px] text-muted tracking-wider uppercase">Trading Journal</p>
+      <footer className="border-t border-border mt-12">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-muted">
+          <div>© {new Date().getFullYear()} {en.app.titleShort} · {en.landing.footerTagline}</div>
+          <div className="flex items-center gap-5">
+            <a href="/about" className="hover:text-text transition-colors">{en.landing.footerAbout}</a>
+            <a href="/privacy" className="hover:text-text transition-colors">{en.landing.footerPrivacy}</a>
+            <a href="/terms" className="hover:text-text transition-colors">{en.landing.footerTerms}</a>
+          </div>
+        </div>
       </footer>
+
+      {signInOpen && <SignInDialog onClose={() => setSignInOpen(false)} />}
     </div>
   )
 }

@@ -62,20 +62,19 @@ app.use('/api/policies', requireAuth, policiesRouter)
 app.use('/api/migrate', requireAuth, migrateRouter)
 app.use('/api', requireAuth, violationsRouter)
 
-// Root → /app redirect. Plan 4 replaces this with the marketing landing page.
-// Must live BEFORE express.static so the default index.html doesn't win.
-app.get('/', (req, res) => {
-  res.redirect(302, '/app')
-})
-
-// Static SPA fallback (Plan 2 wires the built client into public/)
+// Static SPA assets (js/css/images). index:false so `/` doesn't auto-serve
+// index.html — the explicit routes below decide which bundle entry renders.
 app.use(express.static(path.join(__dirname, 'public'), { index: false }))
-app.get('/app', (req, res) => {
+
+// `/` → marketing landing page; `/app` → trading journal app shell.
+// Both served from the same SPA bundle (main.jsx decides at mount time by
+// reading window.location.pathname).
+function sendIndex(req, res) {
   res.sendFile(path.join(__dirname, 'public', 'index.html'))
-})
-app.get('/app/*path', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'))
-})
+}
+app.get('/', sendIndex)
+app.get('/app', sendIndex)
+app.get('/app/*path', sendIndex)
 
 app.listen(PORT, () => {
   console.log(`[server] listening on :${PORT}`)
