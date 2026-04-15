@@ -27,14 +27,20 @@ export default function TradeForm({ initial, editing, mode = "edit", pairs, pair
   const [error, setError] = useState("")
   const [openOnly, setOpenOnly] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  // Track confirmed (checked) policies — unchecked = violation
-  // In edit mode, pre-check policies that were NOT violated
+  // Track confirmed (checked) policies — unchecked = violation.
+  // Uses external_id (stable across LocalStore and ApiStore) as the identifier.
+  // Edit mode: pre-check policies that were NOT violated.
+  // New/close mode: pre-check everything (user unchecks rules they violated).
   const [confirmedPolicies, setConfirmedPolicies] = useState(() => {
+    const active = (policies || []).filter(p =>
+      mode === "edit"
+        ? p.is_active || initialViolations.includes(p.external_id)
+        : p.is_active
+    )
     if (mode === "edit") {
-      const filtered = (policies || []).filter(p => p.is_active || initialViolations.includes(p.id))
-      return filtered.filter(p => !initialViolations.includes(p.id)).map(p => p.id)
+      return active.filter(p => !initialViolations.includes(p.external_id)).map(p => p.external_id)
     }
-    return []
+    return active.map(p => p.external_id)
   })
   const uf = (k) => (v) => { setForm(f => ({ ...f, [k]: v })); setError("") }
 
@@ -70,8 +76,8 @@ export default function TradeForm({ initial, editing, mode = "edit", pairs, pair
     if (isClose && !payload.close_time) payload.close_time = now()
     // Unchecked policies = violations
     payload.violations = filteredPolicies
-      .filter(p => !confirmedPolicies.includes(p.id))
-      .map(p => p.id)
+      .filter(p => !confirmedPolicies.includes(p.external_id))
+      .map(p => p.external_id)
     setSubmitting(true)
     try {
       await onSubmit(payload)
@@ -189,15 +195,15 @@ export default function TradeForm({ initial, editing, mode = "edit", pairs, pair
                 <div key={cat}>
                   <div className="text-[11px] text-muted font-medium mb-1">{catLabel}</div>
                   {catPolicies.map(p => (
-                    <label key={p.id} className={`flex items-center gap-2 py-0.5 cursor-pointer ${
-                      !confirmedPolicies.includes(p.id) ? 'text-red/80' : ''
+                    <label key={p.external_id} className={`flex items-center gap-2 py-0.5 cursor-pointer ${
+                      !confirmedPolicies.includes(p.external_id) ? 'text-red/80' : ''
                     }`}>
                       <input
                         type="checkbox"
-                        checked={confirmedPolicies.includes(p.id)}
+                        checked={confirmedPolicies.includes(p.external_id)}
                         onChange={e => {
                           setConfirmedPolicies(prev =>
-                            e.target.checked ? [...prev, p.id] : prev.filter(id => id !== p.id)
+                            e.target.checked ? [...prev, p.external_id] : prev.filter(id => id !== p.external_id)
                           )
                         }}
                         className="accent-green"

@@ -429,7 +429,7 @@ function AppContent() {
         {tab === "stats" && <Dashboard trades={closedTrades} pairs={pairs} theme={theme} />}
         {tab === "weekly" && <WeeklyNotes notes={notes} onAdd={handleAddNote} onDelete={confirmDeleteNote} />}
         {tab === "monthly" && <MonthlyNotes notes={monthlyNotes} onAdd={handleAddMonthlyNote} onDelete={confirmDeleteMonthlyNote} />}
-        {tab === "policy" && <Policies />}
+        {tab === "policy" && <Policies policies={policies} setPolicies={setPolicies} storeAdapter={storeAdapter} />}
         {tab === "settings" && <Settings pairs={pairs} onPairsChange={setPairs} />}
       </div>
     </Layout>
