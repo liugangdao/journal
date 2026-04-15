@@ -62,15 +62,19 @@ app.use('/api/policies', requireAuth, policiesRouter)
 app.use('/api/migrate', requireAuth, migrateRouter)
 app.use('/api', requireAuth, violationsRouter)
 
-// Static SPA fallback (Plan 2 wires the built client into public/)
-app.use(express.static(path.join(__dirname, 'public')))
-app.get('/app/*path', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'))
+// Root → /app redirect. Plan 4 replaces this with the marketing landing page.
+// Must live BEFORE express.static so the default index.html doesn't win.
+app.get('/', (req, res) => {
+  res.redirect(302, '/app')
 })
 
-// Root + marketing pages: placeholder until Plan 3
-app.get('/', (req, res) => {
-  res.type('text/plain').send('journal.basiscalc.xyz — under construction')
+// Static SPA fallback (Plan 2 wires the built client into public/)
+app.use(express.static(path.join(__dirname, 'public'), { index: false }))
+app.get('/app', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'))
+})
+app.get('/app/*path', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'))
 })
 
 app.listen(PORT, () => {

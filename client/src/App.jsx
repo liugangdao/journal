@@ -74,10 +74,11 @@ function AppContent() {
   }, [storeAdapter])
 
   useEffect(() => {
-    if (!isAuthenticated) return
+    if (storeLoading) return
     setLoading(true)
     Promise.all([reloadData(), fetchPagedTrades(tradeFilter)]).finally(() => setLoading(false))
-  }, [isAuthenticated, reloadData, fetchPagedTrades])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeLoading, isAuthenticated, migrationStatus])
 
   const handleLogout = useCallback(async () => {
     try {
