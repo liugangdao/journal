@@ -55,10 +55,10 @@ export default function WeeklyNotes({ notes, onAdd, onDelete }) {
         <EmptyState type="notes" />
       ) : (
         notes.map(n => (
-          <div key={n.id} className="bg-card border border-border rounded-xl p-4 mb-3 hover:border-border/80 transition-all duration-200">
+          <div key={n.external_id} className="bg-card border border-border rounded-xl p-4 mb-3 hover:border-border/80 transition-all duration-200">
             <div className="flex justify-between items-center mb-3">
               <span className="font-bold text-sm">{n.week}</span>
-              <button onClick={() => onDelete(n.id)}
+              <button onClick={() => onDelete(n.external_id)}
                 className="text-red text-xs cursor-pointer hover:text-red/80 transition-colors">
                 {en.common.delete}
               </button>

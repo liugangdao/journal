@@ -137,14 +137,14 @@ export default function PsychologyPanel({ trades, pairs, pairsByName: providedPa
             {todayMissed.map(t => {
               const isLong = t.direction === 'long'
               return (
-                <div key={t.id} className="flex items-center gap-3 text-sm py-1">
+                <div key={t.external_id} className="flex items-center gap-3 text-sm py-1">
                   <span className="font-medium">{t.pair}</span>
                   <span className={`text-xs px-1.5 py-0.5 rounded ${
                     isLong ? 'bg-green/15 text-green' : 'bg-red/15 text-red'
                   }`}>{isLong ? en.trade.long : en.trade.short}</span>
                   {t.notes && <span className="text-muted text-xs flex-1 truncate">{t.notes}</span>}
                   <button
-                    onClick={() => onDeleteTrade(t.id)}
+                    onClick={() => onDeleteTrade(t.external_id)}
                     className="text-muted hover:text-red text-xs cursor-pointer transition-colors ml-auto"
                   >{en.common.delete}</button>
                 </div>

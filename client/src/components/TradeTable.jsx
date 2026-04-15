@@ -59,7 +59,7 @@ function TradeCard({ trade: t, animIndex, onEdit, onDelete }) {
           {t.notes && <p className="text-xs text-muted mb-3">{t.notes}</p>}
           <div className="flex gap-2">
             <button onClick={(e) => { e.stopPropagation(); onEdit(t) }} className="text-accent text-xs cursor-pointer">{en.common.edit}</button>
-            <button onClick={(e) => { e.stopPropagation(); onDelete(t.id) }} className="text-red text-xs cursor-pointer">{en.common.delete}</button>
+            <button onClick={(e) => { e.stopPropagation(); onDelete(t.external_id) }} className="text-red text-xs cursor-pointer">{en.common.delete}</button>
           </div>
         </div>
       )}
@@ -110,7 +110,7 @@ export default function TradeTable({ trades, onEdit, onDelete, pairsByName, pagi
     <div>
       <div className="sm:hidden space-y-2">
         {sorted.map((t, i) => (
-          <TradeCard key={t.id} trade={t} animIndex={i} onEdit={onEdit} onDelete={onDelete} />
+          <TradeCard key={t.external_id} trade={t} animIndex={i} onEdit={onEdit} onDelete={onDelete} />
         ))}
       </div>
 
@@ -138,7 +138,7 @@ export default function TradeTable({ trades, onEdit, onDelete, pairsByName, pagi
             {sorted.map((t, i) => {
               const isLong = t.direction === 'long'
               return (
-                <tr key={t.id} className="border-b border-border/50 hover:bg-hover transition-colors duration-150">
+                <tr key={t.external_id} className="border-b border-border/50 hover:bg-hover transition-colors duration-150">
                   <td className="px-3 py-3 text-muted">{(pagination ? pagination.offset : 0) + i + 1}</td>
                   <td className="px-3 py-3 whitespace-nowrap" title={t.open_time}>
                     {formatTime(t.open_time)}
@@ -167,7 +167,7 @@ export default function TradeTable({ trades, onEdit, onDelete, pairsByName, pagi
                     <button onClick={() => onEdit(t)} className="text-accent hover:text-accent/80 cursor-pointer mr-2 transition-colors">
                       {en.common.edit}
                     </button>
-                    <button onClick={() => onDelete(t.id)} className="text-red hover:text-red/80 cursor-pointer transition-colors">
+                    <button onClick={() => onDelete(t.external_id)} className="text-red hover:text-red/80 cursor-pointer transition-colors">
                       {en.common.delete}
                     </button>
                   </td>

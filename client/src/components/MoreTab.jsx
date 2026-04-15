@@ -4,7 +4,7 @@ import ExportBar from './ExportBar'
 import { useTelegram } from '../hooks/useTelegram'
 import { en } from '../i18n/en'
 
-export default function MoreTab({ pairs, onPairsChange, onImported, theme, onToggleTheme, user, onLogout }) {
+export default function MoreTab({ pairs, onPairsChange, policies, setPolicies, storeAdapter, onImported, theme, onToggleTheme, user, onLogout }) {
   const isTelegram = useTelegram()
   return (
     <div className="space-y-6">
@@ -49,12 +49,12 @@ export default function MoreTab({ pairs, onPairsChange, onImported, theme, onTog
 
       {/* Policies */}
       <div>
-        <Policies />
+        <Policies policies={policies} setPolicies={setPolicies} storeAdapter={storeAdapter} />
       </div>
 
       {/* Pair settings */}
       <div>
-        <Settings pairs={pairs} onPairsChange={onPairsChange} />
+        <Settings pairs={pairs} onPairsChange={onPairsChange} storeAdapter={storeAdapter} />
       </div>
     </div>
   )

@@ -112,7 +112,7 @@ function AppContent() {
   const pairNames = useMemo(() => pairs.map(p => p.name), [pairs])
   const pairsByName = useMemo(() => new Map(pairs.map((p) => [p.name, p])), [pairs])
 
-  // Trade CRUD
+  // Trade CRUD — all IDs are external_id strings (stable across LocalStore/ApiStore)
   const handleAddTrade = useCallback(async (form) => {
     try {
       const { violations, ...tradeData } = form
@@ -123,7 +123,7 @@ function AppContent() {
       } else {
         const created = await storeAdapter.createTrade(tradeData)
         if (violations && violations.length > 0) {
-          await storeAdapter.updateTradeViolations(created.id, violations)
+          await storeAdapter.updateTradeViolations(created.external_id, violations)
         }
       }
       setShowForm(false)
@@ -138,7 +138,7 @@ function AppContent() {
   }, [editing, toast, storeAdapter])
 
   const handleCloseTrade = useCallback((trade) => {
-    setClosingId(trade.id)
+    setClosingId(trade.external_id)
     setEditing(null)
     setShowForm(true)
   }, [])
@@ -160,11 +160,11 @@ function AppContent() {
   }, [closingId, toast, storeAdapter])
 
   const handleEditTrade = useCallback(async (trade) => {
-    setEditing(trade.id)
+    setEditing(trade.external_id)
     setClosingId(null)
     setTab("record")
     try {
-      const violations = await storeAdapter.getTradeViolations(trade.id)
+      const violations = await storeAdapter.getTradeViolations(trade.external_id)
       setEditViolations(violations.map(v => v.policy_external_id))
     } catch (err) {
       console.error(err)
@@ -223,10 +223,10 @@ function AppContent() {
     }
   }, [toast, storeAdapter])
 
-  const handleDeleteNote = useCallback(async (id) => {
+  const handleDeleteNote = useCallback(async (externalId) => {
     try {
-      await storeAdapter.deleteNote(id)
-      setNotes(prev => prev.filter(n => n.id !== id))
+      await storeAdapter.deleteNote(externalId)
+      setNotes(prev => prev.filter(n => n.external_id !== externalId))
       toast.success(en.toasts.tradeDeleted)
     } catch (err) {
       console.error(err)
@@ -246,10 +246,10 @@ function AppContent() {
     }
   }, [toast, storeAdapter])
 
-  const handleDeleteMonthlyNote = useCallback(async (id) => {
+  const handleDeleteMonthlyNote = useCallback(async (externalId) => {
     try {
-      await storeAdapter.deleteMonthlyNote(id)
-      setMonthlyNotes(prev => prev.filter(n => n.id !== id))
+      await storeAdapter.deleteMonthlyNote(externalId)
+      setMonthlyNotes(prev => prev.filter(n => n.external_id !== externalId))
       toast.success(en.toasts.tradeDeleted)
     } catch (err) {
       console.error(err)
@@ -278,12 +278,12 @@ function AppContent() {
   const confirmDeleteNote = useCallback((id) => requestDelete(id, 'note'), [requestDelete])
   const confirmDeleteMonthlyNote = useCallback((id) => requestDelete(id, 'monthlyNote'), [requestDelete])
 
-  // Determine form mode and initial data
+  // Determine form mode and initial data. closingId/editing are external_id strings.
   const formMode = closingId ? "close" : editing ? "edit" : "new"
   const formInitial = closingId
-    ? allTrades.find(t => t.id === closingId)
+    ? allTrades.find(t => t.external_id === closingId)
     : editing
-      ? allTrades.find(t => t.id === editing)
+      ? allTrades.find(t => t.external_id === editing)
       : emptyTrade(pairNames)
 
   // Loading auth check
@@ -348,7 +348,9 @@ function AppContent() {
       )
       case 'more': return (
         <MoreTab
-          pairs={pairs} onPairsChange={setPairs} onImported={reloadData}
+          pairs={pairs} onPairsChange={setPairs}
+          policies={policies} setPolicies={setPolicies} storeAdapter={storeAdapter}
+          onImported={reloadData}
           theme={theme} onToggleTheme={toggleTheme} user={isAuthenticated ? { email: userEmail } : null} onLogout={handleLogout}
         />
       )
@@ -430,7 +432,7 @@ function AppContent() {
         {tab === "weekly" && <WeeklyNotes notes={notes} onAdd={handleAddNote} onDelete={confirmDeleteNote} />}
         {tab === "monthly" && <MonthlyNotes notes={monthlyNotes} onAdd={handleAddMonthlyNote} onDelete={confirmDeleteMonthlyNote} />}
         {tab === "policy" && <Policies policies={policies} setPolicies={setPolicies} storeAdapter={storeAdapter} />}
-        {tab === "settings" && <Settings pairs={pairs} onPairsChange={setPairs} />}
+        {tab === "settings" && <Settings pairs={pairs} onPairsChange={setPairs} storeAdapter={storeAdapter} />}
       </div>
     </Layout>
   )

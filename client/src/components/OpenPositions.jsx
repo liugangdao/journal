@@ -25,7 +25,7 @@ export default function OpenPositions({ openTrades, onClose, onDelete }) {
         {openTrades.map((trade, i) => {
           const isLong = trade.direction === 'long'
           return (
-            <div key={trade.id} className="bg-card border border-border rounded-xl p-4 animate-fade-in-up" style={{ animationDelay: `${i * 40}ms` }}>
+            <div key={trade.external_id} className="bg-card border border-border rounded-xl p-4 animate-fade-in-up" style={{ animationDelay: `${i * 40}ms` }}>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-sm">{trade.pair}</span>
@@ -62,7 +62,7 @@ export default function OpenPositions({ openTrades, onClose, onDelete }) {
                   {en.trade.close}
                 </button>
                 <button
-                  onClick={() => onDelete(trade.id)}
+                  onClick={() => onDelete(trade.external_id)}
                   className="text-muted border border-border px-3 py-1.5 rounded-lg text-xs cursor-pointer
                     hover:text-red hover:border-red/30 active:scale-95 transition-all duration-200"
                 >
