@@ -78,13 +78,16 @@ router.get('/verify', (req, res) => {
   res.redirect('/app?just_signed_in=1')
 })
 
-// GET /api/auth/me — return current session user or 401
+// GET /api/auth/me — return current session user, or { authenticated: false }
+// for anonymous visitors. Returns 200 in both cases so the browser devtools
+// don't flood the console with expected-anonymous 401s; real auth protection
+// still lives on the data routes (requireAuth middleware).
 router.get('/me', (req, res) => {
   const userId = req.session?.userId
-  if (!userId) return res.status(401).json({ error: 'Not signed in' })
+  if (!userId) return res.json({ authenticated: false })
   const user = db.prepare('SELECT id, email, display_name, created_at FROM users WHERE id = ?').get(userId)
-  if (!user) return res.status(401).json({ error: 'User not found' })
-  res.json(user)
+  if (!user) return res.json({ authenticated: false })
+  res.json({ authenticated: true, ...user })
 })
 
 // POST /api/auth/logout

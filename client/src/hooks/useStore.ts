@@ -28,21 +28,23 @@ export function useStore(): StoreState {
         const res = await fetch('/api/auth/me', { credentials: 'include' })
         if (cancelled) return
         if (res.ok) {
-          const user = (await res.json()) as { email: string }
-          setState({
-            store: apiStoreSingleton,
-            isAuthenticated: true,
-            userEmail: user.email,
-            loading: false,
-          })
-        } else {
-          setState({
-            store: localStoreSingleton,
-            isAuthenticated: false,
-            userEmail: null,
-            loading: false,
-          })
+          const body = (await res.json()) as { authenticated?: boolean; email?: string }
+          if (body.authenticated && body.email) {
+            setState({
+              store: apiStoreSingleton,
+              isAuthenticated: true,
+              userEmail: body.email,
+              loading: false,
+            })
+            return
+          }
         }
+        setState({
+          store: localStoreSingleton,
+          isAuthenticated: false,
+          userEmail: null,
+          loading: false,
+        })
       } catch {
         if (cancelled) return
         setState({
