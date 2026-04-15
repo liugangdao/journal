@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import WeeklyNotes from './WeeklyNotes'
 import MonthlyNotes from './MonthlyNotes'
+import { en } from '../i18n/en'
 
 export default function NotesTab({ notes, monthlyNotes, onAddNote, onDeleteNote, onAddMonthlyNote, onDeleteMonthlyNote }) {
   const [view, setView] = useState('weekly')
@@ -15,7 +16,7 @@ export default function NotesTab({ notes, monthlyNotes, onAddNote, onDeleteNote,
             active:scale-[0.97] active:opacity-80
             ${view === 'weekly' ? 'bg-accent text-white shadow-sm' : 'text-muted'}`}
         >
-          周度复盘
+          {en.tabs.weekly}
         </button>
         <button
           onClick={() => setView('monthly')}
@@ -23,7 +24,7 @@ export default function NotesTab({ notes, monthlyNotes, onAddNote, onDeleteNote,
             active:scale-[0.97] active:opacity-80
             ${view === 'monthly' ? 'bg-accent text-white shadow-sm' : 'text-muted'}`}
         >
-          月度复盘
+          {en.tabs.monthly}
         </button>
       </div>
 

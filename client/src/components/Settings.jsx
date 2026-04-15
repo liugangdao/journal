@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api } from '../hooks/useApi'
+import { en } from '../i18n/en'
 
 export default function Settings({ pairs, onPairsChange }) {
   const [name, setName] = useState('')
@@ -53,25 +54,25 @@ export default function Settings({ pairs, onPairsChange }) {
 
   return (
     <div>
-      <h2 className="text-lg font-bold mb-5">品种管理</h2>
+      <h2 className="text-lg font-bold mb-5">{en.settings.pairs}</h2>
 
       {error && <div className="mb-4 text-red text-sm">{error}</div>}
 
       {/* Add form */}
       <div className="flex flex-col sm:flex-row gap-3 mb-5 sm:items-end">
         <div>
-          <div className="text-[11px] text-muted mb-1">品种名称</div>
+          <div className="text-[11px] text-muted mb-1">{en.settings.name}</div>
           <input
             value={name}
             onChange={e => setName(e.target.value)}
-            placeholder="如 EUR/USD"
+            placeholder="e.g. EUR/USD"
             className="bg-input text-text border border-border rounded-lg px-3 py-2 text-sm outline-none
               focus:border-accent focus:ring-1 focus:ring-accent/30 transition-all duration-200 w-full sm:w-40"
             onKeyDown={e => e.key === 'Enter' && handleAdd()}
           />
         </div>
         <div>
-          <div className="text-[11px] text-muted mb-1">点差成本</div>
+          <div className="text-[11px] text-muted mb-1">{en.settings.spreadCost}</div>
           <input
             value={spreadCost}
             onChange={e => setSpreadCost(e.target.value)}
@@ -86,7 +87,7 @@ export default function Settings({ pairs, onPairsChange }) {
           className="bg-accent text-white px-5 py-2 rounded-lg text-sm font-semibold cursor-pointer
             hover:brightness-110 transition-all duration-200"
         >
-          添加
+          {en.common.add}
         </button>
       </div>
 
@@ -95,9 +96,9 @@ export default function Settings({ pairs, onPairsChange }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b-2 border-border">
-              <th className="px-4 py-3 text-left text-muted text-[11px] font-semibold">品种名称</th>
-              <th className="px-4 py-3 text-left text-muted text-[11px] font-semibold">点差成本 (USD/手)</th>
-              <th className="px-4 py-3 text-left text-muted text-[11px] font-semibold">操作</th>
+              <th className="px-4 py-3 text-left text-muted text-[11px] font-semibold">{en.settings.name}</th>
+              <th className="px-4 py-3 text-left text-muted text-[11px] font-semibold">{en.settings.spreadCost} (USD/lot)</th>
+              <th className="px-4 py-3 text-left text-muted text-[11px] font-semibold"></th>
             </tr>
           </thead>
           <tbody>
@@ -122,8 +123,8 @@ export default function Settings({ pairs, onPairsChange }) {
                       />
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap">
-                      <button onClick={handleSave} className="text-green hover:text-green/80 cursor-pointer mr-2 transition-colors text-xs">保存</button>
-                      <button onClick={() => setEditingId(null)} className="text-muted hover:text-text cursor-pointer transition-colors text-xs">取消</button>
+                      <button onClick={handleSave} className="text-green hover:text-green/80 cursor-pointer mr-2 transition-colors text-xs">{en.common.save}</button>
+                      <button onClick={() => setEditingId(null)} className="text-muted hover:text-text cursor-pointer transition-colors text-xs">{en.common.cancel}</button>
                     </td>
                   </>
                 ) : (
@@ -131,8 +132,8 @@ export default function Settings({ pairs, onPairsChange }) {
                     <td className="px-4 py-2.5 font-semibold">{p.name}</td>
                     <td className="px-4 py-2.5 font-mono">{p.spread_cost}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap">
-                      <button onClick={() => handleEdit(p)} className="text-accent hover:text-accent/80 cursor-pointer mr-2 transition-colors text-xs">编辑</button>
-                      <button onClick={() => handleDelete(p.id)} className="text-red hover:text-red/80 cursor-pointer transition-colors text-xs">删除</button>
+                      <button onClick={() => handleEdit(p)} className="text-accent hover:text-accent/80 cursor-pointer mr-2 transition-colors text-xs">{en.common.edit}</button>
+                      <button onClick={() => handleDelete(p.id)} className="text-red hover:text-red/80 cursor-pointer transition-colors text-xs">{en.common.delete}</button>
                     </td>
                   </>
                 )}

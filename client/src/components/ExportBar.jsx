@@ -1,11 +1,13 @@
 import { useState, useRef } from 'react'
 import { api } from '../hooks/useApi'
+import { en } from '../i18n/en'
 
 export default function ExportBar({ onImported }) {
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [importing, setImporting] = useState(false)
   const [importMsg, setImportMsg] = useState('')
+  const [importErr, setImportErr] = useState(false)
   const fileRef = useRef(null)
 
   const handleExport = () => {
@@ -17,15 +19,17 @@ export default function ExportBar({ onImported }) {
     if (!file) return
     setImporting(true)
     setImportMsg('')
+    setImportErr(false)
     try {
       const text = await file.text()
       const data = JSON.parse(text)
       const result = await api.importData(data)
       const r = result.imported
-      setImportMsg(`导入成功：${r.trades} 条交易、${r.weeklyNotes} 条周记、${r.monthlyNotes} 条月记`)
+      setImportMsg(`${en.export.imported}: ${r.trades} trades, ${r.weeklyNotes} weekly, ${r.monthlyNotes} monthly`)
       if (onImported) onImported()
     } catch (err) {
-      setImportMsg(`导入失败：${err.message}`)
+      setImportErr(true)
+      setImportMsg(`${en.export.importFailed}: ${err.message}`)
     } finally {
       setImporting(false)
       fileRef.current.value = ''
@@ -36,7 +40,7 @@ export default function ExportBar({ onImported }) {
     <div className="mb-5 space-y-2">
       <div className="flex items-end gap-2 sm:gap-3 flex-wrap">
         <div>
-          <div className="text-[11px] text-muted mb-1">起始日期</div>
+          <div className="text-[11px] text-muted mb-1">{en.filter.from}</div>
           <input
             type="date"
             value={from}
@@ -46,7 +50,7 @@ export default function ExportBar({ onImported }) {
           />
         </div>
         <div>
-          <div className="text-[11px] text-muted mb-1">结束日期</div>
+          <div className="text-[11px] text-muted mb-1">{en.filter.to}</div>
           <input
             type="date"
             value={to}
@@ -60,14 +64,14 @@ export default function ExportBar({ onImported }) {
           className="px-4 py-1.5 rounded-lg text-xs font-medium text-muted border border-border
             hover:text-text hover:border-accent/50 transition-all duration-200 cursor-pointer"
         >
-          导出数据
+          {en.export.export}
         </button>
         <label
           className={`px-4 py-1.5 rounded-lg text-xs font-medium text-muted border border-border
             hover:text-text hover:border-accent/50 transition-all duration-200 cursor-pointer
             ${importing ? 'opacity-50 pointer-events-none' : ''}`}
         >
-          {importing ? '导入中...' : '导入数据'}
+          {importing ? en.export.importing : en.export.import}
           <input ref={fileRef} type="file" accept=".json" onChange={handleImport} className="hidden" />
         </label>
         {(from || to) && (
@@ -75,12 +79,12 @@ export default function ExportBar({ onImported }) {
             onClick={() => { setFrom(''); setTo('') }}
             className="px-3 py-1.5 rounded-lg text-xs text-muted hover:text-text transition-colors cursor-pointer"
           >
-            清除筛选
+            {en.filter.clear}
           </button>
         )}
       </div>
       {importMsg && (
-        <p className={`text-xs ${importMsg.includes('失败') ? 'text-red' : 'text-green'}`}>
+        <p className={`text-xs ${importErr ? 'text-red' : 'text-green'}`}>
           {importMsg}
         </p>
       )}
