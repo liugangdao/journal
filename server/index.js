@@ -36,12 +36,13 @@ app.use(helmet({
             'https://challenges.cloudflare.com',
             'https://s3.tradingview.com',
             'https://s.tradingview.com',
+            'https://analytics.basiscalc.xyz',
           ],
           frameSrc: [
             'https://challenges.cloudflare.com',
             'https://s.tradingview.com',
           ],
-          connectSrc: ["'self'", 'https://api.resend.com'],
+          connectSrc: ["'self'", 'https://api.resend.com', 'https://analytics.basiscalc.xyz'],
           imgSrc: ["'self'", 'data:', 'https:'],
           styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
           fontSrc: ["'self'", 'https://fonts.gstatic.com'],
@@ -83,6 +84,11 @@ app.use('/api/pairs', requireAuth, pairsRouter)
 app.use('/api/policies', requireAuth, policiesRouter)
 app.use('/api/migrate', requireAuth, migrateRouter)
 app.use('/api', requireAuth, violationsRouter)
+
+// SEO: block all indexing — public landing page lives on basiscalc.xyz
+app.get('/robots.txt', (_req, res) => {
+  res.type('text/plain').send('User-agent: *\nDisallow: /\n')
+})
 
 // Static SPA assets (js/css/images). index:false so `/` doesn't auto-serve
 // index.html — the explicit routes below decide which bundle entry renders.

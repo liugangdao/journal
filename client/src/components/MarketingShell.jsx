@@ -51,7 +51,11 @@ export default function MarketingShell({ children }) {
 
       <footer className="border-t border-border mt-12">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-muted">
-          <div>© {new Date().getFullYear()} {en.app.titleShort} · {en.marketing.footerTagline}</div>
+          <div>
+            © {new Date().getFullYear()} {en.app.titleShort} · {en.marketing.footerTagline}
+            {' · '}
+            <a href="https://basiscalc.xyz" className="hover:text-text transition-colors" target="_blank" rel="noopener">basiscalc.xyz</a>
+          </div>
           <div className="flex items-center gap-5">
             <a href="/about" className="hover:text-text transition-colors">{en.marketing.nav.about}</a>
             <a href="/privacy" className="hover:text-text transition-colors">{en.marketing.nav.privacy}</a>
