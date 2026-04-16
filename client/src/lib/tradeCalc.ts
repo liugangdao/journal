@@ -217,7 +217,8 @@ function calcPipBased(trade: Trade, pair: Pair): TradeCalcOutput {
   const sign = trade.direction === 'long' ? 1 : -1
   const priceDelta = (trade.exit_price - trade.entry) * sign
   const lots = trade.lots ?? 0
-  const grossPnl = priceDelta * pair.contract_size * lots
+  // When lots is missing, return null so enrichTrade falls back to user-entered gross_pnl
+  const grossPnl = lots > 0 ? priceDelta * pair.contract_size * lots : null
 
   const pipMultiplier =
     pair.asset_class === 'forex'
@@ -225,10 +226,16 @@ function calcPipBased(trade: Trade, pair: Pair): TradeCalcOutput {
       : 1
   const pips = priceDelta * pipMultiplier
 
-  const rMultiple =
-    trade.risk_amount && trade.risk_amount !== 0
-      ? grossPnl / trade.risk_amount
-      : null
+  // R-multiple: prefer risk_amount if provided, else derive from stop distance
+  let rMultiple: number | null = null
+  if (trade.risk_amount && trade.risk_amount !== 0 && grossPnl !== null) {
+    rMultiple = grossPnl / trade.risk_amount
+  } else if (trade.stop != null) {
+    const stopDist = (trade.entry - trade.stop) * sign
+    if (stopDist !== 0) {
+      rMultiple = priceDelta / stopDist
+    }
+  }
 
   return { pips, grossPnl, rMultiple }
 }
