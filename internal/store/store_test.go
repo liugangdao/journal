@@ -6,6 +6,7 @@ import (
 	"math"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -174,7 +175,7 @@ func TestCloseTwiceConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.CloseTrade(tr.ID, CloseInput{Exit: 90, ExitReason: "stop"})
-	if !errors.Is(err, ErrConflict) {
+	if !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "已经平仓") {
 		t.Fatal(err)
 	}
 	trs, _ := s.ListTrades(TradeFilter{})

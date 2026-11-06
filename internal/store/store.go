@@ -16,6 +16,15 @@ var (
 	ErrConflict = errors.New("记录冲突")
 )
 
+// conflictError 是带具体说明的冲突，errors.Is(err, ErrConflict) 仍成立，接口原样返回说明。
+type conflictError struct{ msg string }
+
+func (e *conflictError) Error() string        { return e.msg }
+func (e *conflictError) Is(target error) bool { return target == ErrConflict }
+
+// ErrAlreadyClosed 表示重复平仓，常见于两台设备先后平同一笔。
+var ErrAlreadyClosed error = &conflictError{msg: "这笔交易已经平仓（可能已在另一台设备上操作），请刷新后查看"}
+
 type InvalidError struct{ Msg string }
 
 func (e *InvalidError) Error() string { return e.Msg }

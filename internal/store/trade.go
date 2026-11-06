@@ -247,7 +247,7 @@ func (s *Store) CloseTrade(id int64, in CloseInput) (Trade, error) {
 			return err
 		}
 		if t.Status == "closed" {
-			return ErrConflict
+			return ErrAlreadyClosed
 		}
 		closed := now()
 		t.Status = "closed"

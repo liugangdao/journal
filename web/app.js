@@ -318,7 +318,7 @@ function renderDetail(strategy, detail, current) {
   });
   const cards = el("div", "panel stats");
   [["已平仓", `${s.n} 笔`], ["每笔期望 E", rfmt(s.n ? s.expectancy : null)], ["胜率", s.n ? pct(s.win_rate) : "—"], ["累计", rfmt(s.total_r)],
-    ["平均盈利", rfmt(s.n ? s.avg_win : null)], ["平均亏损", rfmt(s.n ? s.avg_loss : null)], ["最大回撤", rfmt(s.max_drawdown_r)], ["最长连亏", `${s.max_loss_streak} 笔`],
+    ["平均盈利", rfmt(s.n && s.win_rate > 0 ? s.avg_win : null)], ["平均亏损", rfmt(s.n && s.win_rate < 1 ? s.avg_loss : null)], ["最大回撤", rfmt(s.max_drawdown_r)], ["最长连亏", `${s.max_loss_streak} 笔`],
     ["R 标准差", fmt(s.std_dev)], ["95% 区间下限", rfmt(s.ci_ok ? s.ci_low : null)], ["95% 区间上限", rfmt(s.ci_ok ? s.ci_high : null)], ["版本", `v${v.no}`]]
     .forEach(([label, value]) => cards.append(el("div", "stat", el("small", "", label), el("b", "num", value))));
   const rules = el("div", "panel rules", el("h2", "section-title", "规则与停用条件"), el("pre", "", v.rules || "未填写规则"), ...killText(v).map(text => el("div", "sub", text)), el("div", "sub", `创建于 ${date(v.created_at)}`));
