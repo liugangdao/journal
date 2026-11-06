@@ -1,0 +1,6 @@
+# 数据库与编译产物
+*.db
+*.db-wal
+*.db-shm
+/journal
+.superpowers/

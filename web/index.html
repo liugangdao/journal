@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>交易日志</title>
+  <script>try{if(localStorage.getItem("journal-theme")==="dark")document.documentElement.dataset.theme="dark"}catch(e){}</script>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <div class="top-in">
+      <div class="brand"><i></i><span>交易日志</span></div>
+      <nav class="nav" aria-label="主导航" id="nav" hidden>
+        <a href="#home">策略面板</a>
+        <a href="#settings">设置</a>
+      </nav>
+      <div class="theme" role="group" aria-label="主题">
+        <button type="button" data-theme-set="eye" aria-pressed="true">护眼</button>
+        <button type="button" data-theme-set="dark" aria-pressed="false">深色</button>
+      </div>
+      <button type="button" class="btn btn-primary" id="new-trade" hidden>＋ 记一笔</button>
+    </div>
+  </header>
+  <main>
+    <div id="notice" class="note" role="status" hidden></div>
+    <section id="view" class="view" aria-label="交易日志内容"></section>
+    <noscript>请启用 JavaScript 以登录和记录交易。</noscript>
+  </main>
+  <div id="modal" class="scrim" hidden></div>
+</body>
+</html>

@@ -1,0 +1,155 @@
+# 交易日志
+
+单用户手动交易日志。Go 服务内嵌原生 HTML / CSS / JavaScript，SQLite 保存策略、版本、交易和设置，无前端构建步骤、外部字体或 CDN。
+
+## 本地构建与运行
+
+需要 Go 1.22 或更新版本。在本目录执行：
+
+```sh
+go build -o journal ./cmd/journal
+export JOURNAL_TOKEN="$(openssl rand -hex 24)"
+./journal
+```
+
+打开 `http://127.0.0.1:8800`，输入 `JOURNAL_TOKEN` 对应的口令。可在自己的终端查看该环境变量并保存到密码管理器。运行中的服务器不会打印口令。口令保存在当前浏览器的 `localStorage`，设置页可退出登录；任何 API 返回 401 时会清除口令并回到登录页。
+
+| 环境变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| `JOURNAL_TOKEN` | 无，必填 | 未设置或为空时拒绝启动，退出码非 0 |
+| `JOURNAL_DB` | `./journal.db` | SQLite 路径，父目录需存在且可写 |
+| `JOURNAL_ADDR` | `127.0.0.1:8800` | HTTP 监听地址 |
+
+交叉编译 Linux amd64（纯 Go SQLite，无需 cgo）：
+
+```sh
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o journal ./cmd/journal
+```
+
+## 使用与计算口径
+
+- 首页新建策略后即可记一笔。权益默认取最近一笔，风险比例取设置；实际数量留空时采用建议数量，填写后 1R 和名义价值使用实际数量。
+- 价格、权益、比例、数量等输入支持千分位、空白和全角字符，非法数字不会提交。止损在错误一侧时禁用保存。
+- 平仓预览 R 会扣除资金费（付出为正，收到为负）。持仓期间最高、最低价均填写时才计算 MFE / MAE。
+- 当前版本详情中的交易可修改开仓与平仓字段，也可在弹层内二次确认后删除。旧版本详情只读；旧版本尚未平仓的交易仍可从首页平仓，计入其原版本。
+- 只改策略名称不生成版本；修改规则或停用条件会生成新版本，新旧样本分别统计。改名和新建版本使用两个接口；如第二步失败，已成功的改名会保留，弹层显示错误并可重试。
+- 归档策略不能再开仓，可在首页展开查看并在当前版本详情取消归档；归档与旧版交易仍计入全局汇总。
+- 结论、警示和统计由后端计算。置信区间图固定在 −1R 至 +1R，超出的图形截到边缘，文字保留真实端点。累计 R 按平仓时间排序；无样本时保持可读的零线。
+- 时间按浏览器本地时区显示。护眼为默认主题，柔和深色可在顶栏切换，选择保存在本机。
+
+`PATCH /api/trades/{id}` 的 `clear` 数组只允许 `high`、`low`、`funding`、`review_note`。先应用赋值，再清空这些字段，最后重新校验并写入；同时赋值和清空时以清空为准。重复的合法字段可接受，非法字段使整个补丁失败。前端编辑时将留空的选填项放入 `clear`。
+
+## 服务器部署
+
+以下是交付操作示例，本次开发不会执行服务器部署。将 `server` 换成自己的主机。在本地从本目录上传：
+
+```sh
+scp journal deploy/journal.service deploy/journal.env.example server:/tmp/
+```
+
+在服务器上执行（首次部署，使用支持 systemd 的 Linux）：
+
+```sh
+sudo useradd --system --home-dir /var/lib/journal --shell /usr/sbin/nologin journal
+sudo install -d -o root -g root -m 755 /opt/journal
+sudo install -d -o journal -g journal -m 700 /var/lib/journal
+sudo install -d -o root -g root -m 700 /etc/journal
+sudo install -o root -g root -m 755 /tmp/journal /opt/journal/journal
+sudo install -o root -g root -m 600 /tmp/journal.env.example /etc/journal/journal.env
+sudo install -o root -g root -m 644 /tmp/journal.service /etc/systemd/system/journal.service
+openssl rand -hex 24
+sudoedit /etc/journal/journal.env
+sudo systemctl daemon-reload
+sudo systemctl enable --now journal
+sudo systemctl status journal
+```
+
+在编辑器内把生成的口令填到 `JOURNAL_TOKEN=` 后，再启动服务。环境文件由 root 持有、权限为 600，systemd 会在切换为独立用户之前读取；口令不写入服务文件。数据库和 WAL 文件位于 `/var/lib/journal`。更新程序时先 `sudo systemctl stop journal`，再安装新二进制并 `sudo systemctl start journal`。
+
+服务收到 SIGINT / SIGTERM 后停止接受连接，最多等待 10 秒结束在途请求，再关闭数据库。日志用 `sudo journalctl -u journal` 查看。
+
+### HTTPS 反向代理
+
+将域名解析到服务器，通过 HTTPS 访问。应用监听回环地址，由反向代理提供公网入口。
+
+Caddy 的最小站点配置（替换域名；开放 80 / 443 端口）：
+
+```caddyfile
+journal.example.com {
+    reverse_proxy 127.0.0.1:8800
+}
+```
+
+Nginx 示例（先通过自己的证书管理流程取得域名证书，再替换证书路径）：
+
+```nginx
+server {
+    listen 80;
+    server_name journal.example.com;
+    return 301 https://journal.example.com$request_uri;
+}
+server {
+    listen 443 ssl;
+    server_name journal.example.com;
+    ssl_certificate /etc/letsencrypt/live/journal.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/journal.example.com/privkey.pem;
+    client_max_body_size 10m;
+    location / {
+        proxy_pass http://127.0.0.1:8800;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+反向代理会转发 Bearer 鉴权头；不要给 `/api/` 配置响应缓存。导入请求上限为 10 MiB。
+
+## 备份与恢复
+
+推荐在设置页导出 JSON：浏览器携带口令请求完整数据，再以 Blob 下载。导入需选文件并在弹层中确认整库替换，非法备份由后端整体拒绝，不做部分导入。备份包含全部交易资料，应自行妥善保管。
+
+文件备份先停服，再将数据库和存在的 `-wal` / `-shm` 一起复制。不要只复制运行中的主数据库文件。
+
+```sh
+sudo systemctl stop journal
+journal_backup_dir="/srv/journal-backup-$(date -u +%Y%m%dT%H%M%SZ)"
+sudo mkdir -m 700 "$journal_backup_dir"
+sudo sh -c 'for f in /var/lib/journal/journal.db /var/lib/journal/journal.db-wal /var/lib/journal/journal.db-shm; do if [ -f "$f" ]; then cp -p "$f" "$1/"; fi; done' sh "$journal_backup_dir"
+sudo systemctl start journal
+```
+
+每次文件备份应使用新的空备份目录，避免残留旧 WAL。恢复也须停服：先保存并移走现有数据库及其伴随文件，再完整恢复同一份备份，确保文件属于 `journal:journal` 后启动。正常停服可能已将 WAL 合并并移除伴随文件，此时只会复制存在的文件。
+
+## 实施与验证记录（Task 5、6）
+
+2026-11-06：已实现前端、内嵌资源、环境配置、信号关闭、部署示例，以及选填字段清空和 store 回归测试。未新增依赖。设计与计划分别见 [设计说明](../docs/superpowers/specs/2026-11-06-trade-journal-design.md) 和 [实施计划](../docs/superpowers/plans/2026-11-06-trade-journal.md)。遵守本次文件范围，进度与验证集中记录于此。
+
+- 已执行 `go test ./internal/store -run TestUpdateTradeClearOptional -v`：6 个子测试通过，覆盖逐项和全部清空、非法字段回滚、重新校验及清空优先级。
+- `gofmt -l .`：首次输出 `web/embed.go`；补上嵌入指令前的注释分隔行后，复查无输出，退出码 0。
+- `go vet ./...`：无输出，退出码 0。
+- `go test ./...`：退出码 0，实际输出如下。
+
+```text
+?   github.com/liugangdao/journal/cmd/journal [no test files]
+?   github.com/liugangdao/journal/web [no test files]
+ok  github.com/liugangdao/journal/internal/api 1.012s
+ok  github.com/liugangdao/journal/internal/stats (cached)
+ok  github.com/liugangdao/journal/internal/store 1.205s
+```
+
+- `go build -o /tmp/journal-bin ./cmd/journal`：无输出，退出码 0。
+- 根目录执行 `node --check web/app.js`：无输出，退出码 0。
+- 临时目录数据库、`JOURNAL_TOKEN=dev`、`JOURNAL_ADDR=127.0.0.1:18800` 的 HTTP 冒烟通过，进程已停止，临时数据库已清理：
+
+```text
+GET /: 200，包含 <title>交易日志</title>
+GET /api/overview（无口令）: 401
+GET /api/overview（Bearer dev）: 200
+SIGTERM 后退出码: 0
+未设置 JOURNAL_TOKEN 时退出码: 1
+交易日志启动或运行失败：未设置 JOURNAL_TOKEN，拒绝启动
+```
+
+- `git diff --check`：无输出；源码检查未发现 `innerHTML`、`alert/confirm/prompt` 或外部资源加载，`.gitignore` 仅追加指定三行。工作区原有其他修改未触碰，未提交或推送。
+- 浏览器视觉与交互验收（包括 400px 宽度下实际布局）尚未运行，按计划交由审核者执行，验收状态待验证；服务器部署未执行。
