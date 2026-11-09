@@ -25,6 +25,16 @@ func (e *conflictError) Is(target error) bool { return target == ErrConflict }
 // ErrAlreadyClosed 表示重复平仓，常见于两台设备先后平同一笔。
 var ErrAlreadyClosed error = &conflictError{msg: "这笔交易已经平仓（可能已在另一台设备上操作），请刷新后查看"}
 
+// ErrNameTaken 表示策略重名，比笼统的"记录冲突"更容易看懂。
+var ErrNameTaken error = &conflictError{msg: "策略名称已存在，请换一个名称"}
+
+func nameConflict(err error) error {
+	if errors.Is(err, ErrConflict) {
+		return ErrNameTaken
+	}
+	return err
+}
+
 type InvalidError struct{ Msg string }
 
 func (e *InvalidError) Error() string { return e.Msg }

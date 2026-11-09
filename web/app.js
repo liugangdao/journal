@@ -34,8 +34,18 @@ function numberOf(input, label, optional = false) {
   if (!Number.isFinite(value)) throw new Error(`${label}必须是有效数字`);
   return value;
 }
-const fmt = (n, digits = 2) => Number.isFinite(n) ? n.toLocaleString("en-US", { maximumFractionDigits: digits }) : "—";
-const rfmt = n => Number.isFinite(n) ? `${n > 0 ? "+" : ""}${fmt(n)}R` : "—";
+// 四舍五入后为零的小数显示为 0，不显示 "-0" 或 "+0"。
+function fmt(n, digits = 2) {
+  if (!Number.isFinite(n)) return "—";
+  const text = n.toLocaleString("en-US", { maximumFractionDigits: digits });
+  return text === "-0" ? "0" : text;
+}
+function rfmt(n) {
+  if (!Number.isFinite(n)) return "—";
+  const text = fmt(n);
+  return `${n > 0 && text !== "0" ? "+" : ""}${text}R`;
+}
+const ddfmt = n => Number.isFinite(n) ? `${fmt(n)}R` : "—";
 const tone = n => Number.isFinite(n) ? (n > 0 ? "pos" : n < 0 ? "neg" : "") : "";
 const pct = n => Number.isFinite(n) ? `${fmt(n * 100, 1)}%` : "—";
 const date = value => value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—";
@@ -156,7 +166,7 @@ function modal(title, submitText, action) {
   const error = el("div", "err modal-error");
   error.setAttribute("role", "alert");
   error.hidden = true;
-  const footer = el("div", "sheet-f", button("取消", () => closeModal()));
+  const footer = el("div", "sheet-f", button(action ? "取消" : "关闭", () => closeModal()));
   const submit = button(submitText || "关闭", null, "btn btn-primary");
   if (action) { submit.type = "submit"; footer.append(submit); bindSubmit(form, error, () => action(m)); }
   form.append(el("div", "sheet-h", heading, x), body, error, footer);
@@ -318,7 +328,7 @@ function renderDetail(strategy, detail, current) {
   });
   const cards = el("div", "panel stats");
   [["已平仓", `${s.n} 笔`], ["每笔期望 E", rfmt(s.n ? s.expectancy : null)], ["胜率", s.n ? pct(s.win_rate) : "—"], ["累计", rfmt(s.total_r)],
-    ["平均盈利", rfmt(s.n && s.win_rate > 0 ? s.avg_win : null)], ["平均亏损", rfmt(s.n && s.win_rate < 1 ? s.avg_loss : null)], ["最大回撤", rfmt(s.max_drawdown_r)], ["最长连亏", `${s.max_loss_streak} 笔`],
+    ["平均盈利", rfmt(s.n && s.win_rate > 0 ? s.avg_win : null)], ["平均亏损", rfmt(s.n && s.win_rate < 1 ? s.avg_loss : null)], ["最大回撤", ddfmt(s.max_drawdown_r)], ["最长连亏", `${s.max_loss_streak} 笔`],
     ["R 标准差", fmt(s.std_dev)], ["95% 区间下限", rfmt(s.ci_ok ? s.ci_low : null)], ["95% 区间上限", rfmt(s.ci_ok ? s.ci_high : null)], ["版本", `v${v.no}`]]
     .forEach(([label, value]) => cards.append(el("div", "stat", el("small", "", label), el("b", "num", value))));
   const rules = el("div", "panel rules", el("h2", "section-title", "规则与停用条件"), el("pre", "", v.rules || "未填写规则"), ...killText(v).map(text => el("div", "sub", text)), el("div", "sub", `创建于 ${date(v.created_at)}`));
@@ -327,7 +337,7 @@ function renderDetail(strategy, detail, current) {
     checkCard("去掉最好的 5 笔", [["原期望", rnum(s.n ? s.expectancy : null)], [`剩余 ${Math.max(0, s.n - 5)} 笔`, rnum(stats.top_removed.computed ? stats.top_removed.e : null)]], !stats.top_removed.computed ? "超过 5 笔后计算。" : stats.top_removed.warn ? "收益集中在少数几笔" : "未触发收益集中警示。", stats.top_removed.warn),
     checkCard("按规则 / 违规", [[`按规则 ${stats.rules.followed_n} 笔 · E`, rnum(stats.rules.followed_n ? stats.rules.followed_e : null)], ["按规则累计", rnum(stats.rules.followed_r)], [`违规 ${stats.rules.violated_n} 笔 · E`, rnum(stats.rules.violated_n ? stats.rules.violated_e : null)], ["违规累计", rnum(stats.rules.violated_r)]]),
     checkCard("入场 / 出场质量", [["平均最大浮盈", rnum(stats.quality.n ? stats.quality.avg_mfe : null)], ["平均最大浮亏", rnum(stats.quality.n ? stats.quality.avg_mae : null)], ["平均利润回吐", rnum(stats.quality.n ? stats.quality.avg_giveback : null)]], `${stats.quality.n} / ${s.n} 笔填写了最高、最低价。`),
-    checkCard("停用条件", [["最近均值", rnum(stats.kill.recent_evaluated ? stats.kill.recent_mean : null)], ["最近 N 笔", v.kill_recent_n == null ? "未启用" : !stats.kill.recent_evaluated ? `不足 ${v.kill_recent_n} 笔，未判定` : stats.kill.recent_triggered ? "已触发" : "未触发"], ["最大回撤", rnum(s.max_drawdown_r)], ["回撤条件", v.kill_max_dd_r == null ? "未启用" : !stats.kill.dd_evaluated ? "未判定" : stats.kill.dd_triggered ? "已触发" : "未触发"]], killText(v).join("；"), stats.kill.triggered));
+    checkCard("停用条件", [["最近均值", rnum(stats.kill.recent_evaluated ? stats.kill.recent_mean : null)], ["最近 N 笔", v.kill_recent_n == null ? "未启用" : !stats.kill.recent_evaluated ? `不足 ${v.kill_recent_n} 笔，未判定` : stats.kill.recent_triggered ? "已触发" : "未触发"], ["最大回撤", ddfmt(s.max_drawdown_r)], ["回撤条件", v.kill_max_dd_r == null ? "未启用" : !stats.kill.dd_evaluated ? "未判定" : stats.kill.dd_triggered ? "已触发" : "未触发"]], killText(v).join("；"), stats.kill.triggered));
   const history = el("div", "panel rows");
   [...strategy.versions].reverse().forEach(version => {
     const row = link("", `#strategy-${strategy.id}-v${version.no}`, "row link history-row");
@@ -391,6 +401,10 @@ function tradeModal(mode, trade = {}, readonly = false) {
         else body[key] = value;
       }
       if (!closing && !body.review_note.trim()) { body.clear.push("review_note"); delete body.review_note; }
+      // 持仓期间的最高、最低价必须包住入场价和出场价，否则最大浮盈 / 浮亏会算错。
+      const entryPrice = closing ? trade.entry : body.entry;
+      if (body.high != null && body.high < Math.max(entryPrice, body.exit)) throw new Error("最高价不应低于入场价和出场价，请检查是否填反或填错");
+      if (body.low != null && body.low > Math.min(entryPrice, body.exit)) throw new Error("最低价不应高于入场价和出场价，请检查是否填反或填错");
     }
     await api(opening || closing ? "POST" : "PATCH", opening ? "/api/trades" : `/api/trades/${trade.id}${closing ? "/close" : ""}`, body);
     await saved(opening ? "开仓已记录。" : closing ? "已平仓，统计已更新。" : "交易已更新。");
@@ -430,7 +444,7 @@ function tradeModal(mode, trade = {}, readonly = false) {
   stopError.hidden = true;
   if (!closing) {
     calc.append(...[["1R（实际数量）", riskValue], ["建议数量", qtyValue], ["名义价值", nominalValue]].map(([label, value]) => el("div", "", el("small", "", label), value)));
-    m.body.append(calc, stopError, addField("qty", "实际数量（留空使用建议值）", trade.qty), addField("entry_reason", "入场理由（必填，下单前写）", trade.entry_reason, "textarea"));
+    m.body.append(calc, stopError, addField("qty", opening ? "实际数量（留空使用建议值）" : "实际数量", trade.qty), addField("entry_reason", "入场理由（必填，下单前写）", trade.entry_reason, "textarea"));
   }
   const preview = el("div", "bigR num", "—");
   if (hasClose) {
@@ -513,7 +527,7 @@ function strategyModal(strategy, current) {
       await api("PATCH", `/api/strategies/${strategy.id}`, { name: newName });
       strategy.name = newName;
     }
-    if (Object.keys(data).some(key => data[key] !== current[key])) {
+    if (Object.keys(data).some(key => data[key] !== (key === "rules" ? (current.rules || "").trim() : current[key]))) {
       const created = await api("POST", `/api/strategies/${strategy.id}/versions`, data);
       closeModal(true);
       location.hash = `strategy-${strategy.id}-v${created.no}`;

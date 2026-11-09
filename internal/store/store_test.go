@@ -106,8 +106,20 @@ func TestDuplicateNameConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.UpdateStrategy(a.ID, ptr("趋势"), nil)
-	if !errors.Is(err, ErrConflict) {
+	if !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "名称已存在") {
 		t.Fatal(err)
+	}
+}
+
+func TestVersionRulesTrimmed(t *testing.T) {
+	s := newStore(t)
+	a, v1, err := s.CreateStrategy("留白", VersionInput{Rules: "  高二入场\n"})
+	if err != nil || v1.Rules != "高二入场" {
+		t.Fatalf("%q %v", v1.Rules, err)
+	}
+	v2, err := s.CreateVersion(a.ID, VersionInput{Rules: "\t新规则  "})
+	if err != nil || v2.Rules != "新规则" {
+		t.Fatalf("%q %v", v2.Rules, err)
 	}
 }
 

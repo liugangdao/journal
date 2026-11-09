@@ -151,6 +151,7 @@ func insertVersion(q querier, v Version) (Version, error) {
 
 func (s *Store) CreateStrategy(name string, v VersionInput) (Strategy, Version, error) {
 	a := Strategy{Name: strings.TrimSpace(name), CreatedAt: now()}
+	v.Rules = strings.TrimSpace(v.Rules)
 	var version Version
 	if a.Name == "" {
 		return a, version, invalidError("策略名称不能为空")
@@ -170,7 +171,7 @@ func (s *Store) CreateStrategy(name string, v VersionInput) (Strategy, Version, 
 		version, err = insertVersion(tx, Version{StrategyID: a.ID, No: 1, VersionInput: v, CreatedAt: a.CreatedAt})
 		return err
 	})
-	return a, version, err
+	return a, version, nameConflict(err)
 }
 
 func (s *Store) UpdateStrategy(id int64, name *string, archived *bool) (Strategy, error) {
@@ -193,11 +194,12 @@ func (s *Store) UpdateStrategy(id int64, name *string, archived *bool) (Strategy
 		_, err = tx.Exec("UPDATE strategies SET name=?,archived=? WHERE id=?", a.Name, a.Archived, id)
 		return err
 	})
-	return a, err
+	return a, nameConflict(err)
 }
 
 func (s *Store) CreateVersion(strategyID int64, v VersionInput) (Version, error) {
 	var out Version
+	v.Rules = strings.TrimSpace(v.Rules)
 	if err := validateVersion(v); err != nil {
 		return out, err
 	}
