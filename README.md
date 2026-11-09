@@ -64,9 +64,39 @@ sudo systemctl enable --now journal
 sudo systemctl status journal
 ```
 
-在编辑器内把生成的口令填到 `JOURNAL_TOKEN=` 后，再启动服务。环境文件由 root 持有、权限为 600，systemd 会在切换为独立用户之前读取；口令不写入服务文件。数据库和 WAL 文件位于 `/var/lib/journal`。更新程序时先 `sudo systemctl stop journal`，再安装新二进制并 `sudo systemctl start journal`。
+在编辑器内把生成的口令填到 `JOURNAL_TOKEN=` 后，再启动服务。环境文件由 root 持有、权限为 600，systemd 会在切换为独立用户之前读取；口令不写入服务文件。数据库和 WAL 文件位于 `/var/lib/journal`。以后更新程序见下文"更新部署"。
 
 服务收到 SIGINT / SIGTERM 后停止接受连接，最多等待 10 秒结束在途请求，再关闭数据库。日志用 `sudo journalctl -u journal` 查看。
+
+### 更新部署
+
+在本地从本目录执行。先跑测试，再编译服务器用的二进制（纯 Go，无需 CGO；服务器是 ARM 时把 `amd64` 换成 `arm64`），上传后运行更新脚本：
+
+```sh
+go test ./...
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o journal ./cmd/journal
+scp journal server:/tmp/journal.new
+ssh server sh -s < deploy/update.sh
+```
+
+`deploy/update.sh` 会停服，把数据库和旧程序备份到 `/var/lib/journal-backup-日期时间/`，安装新程序后重启，最后检查服务状态和鉴权（不带口令访问接口应返回 401）。停机只有几秒。非 root 用户登录时脚本自动使用 `sudo`。
+
+更新后如有问题，回滚到旧程序：
+
+```sh
+sudo systemctl stop journal
+sudo install -o root -g root -m 755 /var/lib/journal-backup-日期时间/journal.old /opt/journal/journal
+sudo systemctl start journal
+```
+
+如果新版本改坏了数据，还要把同一备份目录里的数据库文件一并恢复，方法见"备份与恢复"。
+
+程序给前端文件设置了 `Cache-Control: no-cache` 和内容 ETag，但经过 Cloudflare 代理时，Cloudflare 可能按自己的规则缓存并改写缓存头。更新后：
+
+1. 在 Cloudflare 后台清除缓存（Caching → Configuration → Purge Everything，或只清除首页、`/app.js`、`/app.css`）。
+2. 浏览器按 Ctrl+Shift+R 强制刷新；手机上可清除该网站数据。
+
+否则可能看到旧前端，最长几个小时。想省掉这一步，可以在 Cloudflare 加一条 Cache Rule：主机名为本站时选择 Bypass cache。
 
 ### HTTPS 反向代理
 
