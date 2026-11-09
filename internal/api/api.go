@@ -2,7 +2,9 @@ package api
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -37,8 +39,10 @@ func New(s *store.Store, token string, web fs.FS) http.Handler {
 	mux.HandleFunc("POST /api/import", a.importDump)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { writeError(w, store.ErrNotFound) })
 	var files http.Handler
+	var etags map[string]string
 	if web != nil {
 		files = http.FileServer(http.FS(web))
+		etags = contentETags(web)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
@@ -65,9 +69,32 @@ func New(s *store.Store, token string, web fs.FS) http.Handler {
 			// 交给文件服务器发送首页，保留内容类型、HEAD 及缓存语义。
 			r = r.Clone(r.Context())
 			r.URL.Path = "/"
+			name = "index.html"
+		}
+		// 每次向服务器确认是否有更新，内容未变时只返回 304；
+		// 否则 Cloudflare 和浏览器会按默认规则缓存数小时，更新后看不到新前端。
+		w.Header().Set("Cache-Control", "no-cache")
+		if etag, ok := etags[name]; ok {
+			w.Header().Set("ETag", etag)
 		}
 		files.ServeHTTP(w, r)
 	})
+}
+
+// contentETags 按文件内容计算 ETag。内嵌文件没有修改时间，只能用内容判断是否变化。
+func contentETags(web fs.FS) map[string]string {
+	etags := map[string]string{}
+	_ = fs.WalkDir(web, ".", func(name string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if b, err := fs.ReadFile(web, name); err == nil {
+			sum := sha256.Sum256(b)
+			etags[name] = `"` + hex.EncodeToString(sum[:8]) + `"`
+		}
+		return nil
+	})
+	return etags
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

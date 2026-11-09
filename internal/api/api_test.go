@@ -347,6 +347,36 @@ func TestWebFallbackAndAPIBoundary(t *testing.T) {
 	}
 }
 
+// 更新程序后前端要立即生效：静态文件不能被代理或浏览器按默认规则缓存数小时。
+func TestStaticRevalidates(t *testing.T) {
+	st, _ := setup(t)
+	h := New(st, "t0ken", fstest.MapFS{"index.html": {Data: []byte("<title>交易日志</title>")}, "app.js": {Data: []byte("1")}})
+	get := func(path, etag string) *httptest.ResponseRecorder {
+		r := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", path, nil)
+		if etag != "" {
+			req.Header.Set("If-None-Match", etag)
+		}
+		h.ServeHTTP(r, req)
+		return r
+	}
+	js, index := get("/app.js", ""), get("/strategy/1", "")
+	for _, r := range []*httptest.ResponseRecorder{js, index} {
+		if r.Code != 200 || r.Header().Get("Cache-Control") != "no-cache" || r.Header().Get("ETag") == "" {
+			t.Fatalf("%d %q %q", r.Code, r.Header().Get("Cache-Control"), r.Header().Get("ETag"))
+		}
+	}
+	if js.Header().Get("ETag") == index.Header().Get("ETag") {
+		t.Fatal("不同文件的 ETag 应不同")
+	}
+	if r := get("/app.js", js.Header().Get("ETag")); r.Code != 304 {
+		t.Fatalf("未变化应返回 304，得到 %d", r.Code)
+	}
+	if r := get("/", index.Header().Get("ETag")); r.Code != 304 {
+		t.Fatalf("首页未变化应返回 304，得到 %d", r.Code)
+	}
+}
+
 func TestJSONNamesAndUTCTimes(t *testing.T) {
 	_, s := setup(t)
 	a := newStrategy(t, s)
