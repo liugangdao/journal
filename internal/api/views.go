@@ -2,6 +2,8 @@ package api
 
 import (
 	"math"
+	"sort"
+	"time"
 
 	"github.com/liugangdao/journal/internal/stats"
 	"github.com/liugangdao/journal/internal/store"
@@ -155,4 +157,66 @@ func (s snapshot) overview() overviewView {
 		}
 	}
 	return o
+}
+
+type monthStrategyView struct {
+	ID         int64   `json:"id"`
+	Name       string  `json:"name"`
+	Archived   bool    `json:"archived"`
+	N          int     `json:"n"`
+	WinRate    float64 `json:"win_rate"`
+	TotalR     float64 `json:"total_r"`
+	Expectancy float64 `json:"expectancy"`
+}
+type monthlyView struct {
+	From          time.Time           `json:"from"`
+	To            time.Time           `json:"to"`
+	N             int                 `json:"n"`
+	WinRate       float64             `json:"win_rate"`
+	AvgWin        float64             `json:"avg_win"`
+	AvgLoss       float64             `json:"avg_loss"`
+	Expectancy    float64             `json:"expectancy"`
+	TotalR        float64             `json:"total_r"`
+	MaxDrawdownR  float64             `json:"max_drawdown_r"`
+	MaxLossStreak int                 `json:"max_loss_streak"`
+	FollowedRate  *float64            `json:"followed_rate"`
+	ViolatedN     int                 `json:"violated_n"`
+	ViolatedR     float64             `json:"violated_r"`
+	Strategies    []monthStrategyView `json:"strategies"`
+}
+
+// monthly 统计平仓时间落在 [from, to) 内的交易；同一策略的各版本合并，归档策略也计入。
+func (s snapshot) monthly(from, to time.Time) monthlyView {
+	all := []stats.ClosedTrade{}
+	by := map[int64][]stats.ClosedTrade{}
+	for _, t := range s.dump.Trades {
+		if t.Status != "closed" || t.ClosedAt.Before(from) || !t.ClosedAt.Before(to) {
+			continue
+		}
+		c := closedTrade(t)
+		all = append(all, c)
+		id := s.versions[t.VersionID].StrategyID
+		by[id] = append(by[id], c)
+	}
+	// 月度样本太小，不输出置信区间与结论，只取描述性数字。
+	st := stats.Compute(all, stats.KillRule{}, 0)
+	m := monthlyView{From: from, To: to, N: st.Summary.N, WinRate: st.Summary.WinRate, AvgWin: st.Summary.AvgWin, AvgLoss: st.Summary.AvgLoss,
+		Expectancy: st.Summary.Expectancy, TotalR: st.Summary.TotalR, MaxDrawdownR: st.Summary.MaxDrawdownR, MaxLossStreak: st.Summary.MaxLossStreak,
+		ViolatedN: st.Rules.ViolatedN, ViolatedR: st.Rules.ViolatedR, Strategies: []monthStrategyView{}}
+	if m.N > 0 {
+		rate := float64(st.Rules.FollowedN) / float64(m.N)
+		m.FollowedRate = &rate
+	}
+	for id, trades := range by {
+		a, sum := s.strategies[id], stats.Compute(trades, stats.KillRule{}, 0).Summary
+		m.Strategies = append(m.Strategies, monthStrategyView{ID: id, Name: a.Name, Archived: a.Archived, N: sum.N, WinRate: sum.WinRate, TotalR: sum.TotalR, Expectancy: sum.Expectancy})
+	}
+	sort.Slice(m.Strategies, func(i, j int) bool {
+		a, b := m.Strategies[i], m.Strategies[j]
+		if a.TotalR != b.TotalR {
+			return a.TotalR > b.TotalR
+		}
+		return a.ID < b.ID
+	})
+	return m
 }

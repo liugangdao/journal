@@ -23,6 +23,7 @@ func New(s *store.Store, token string, web fs.FS) http.Handler {
 	a := &api{store: s}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/overview", a.overview)
+	mux.HandleFunc("GET /api/monthly", a.monthly)
 	mux.HandleFunc("GET /api/strategies", a.strategies)
 	mux.HandleFunc("POST /api/strategies", a.createStrategy)
 	mux.HandleFunc("GET /api/strategies/{id}", a.strategy)

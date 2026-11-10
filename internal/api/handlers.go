@@ -17,6 +17,22 @@ func (a *api) overview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.overview())
 }
 
+// monthly 的月份边界由前端按浏览器时区算好传入，服务端只按时间段筛选。
+func (a *api) monthly(w http.ResponseWriter, r *http.Request) {
+	from, err1 := time.Parse(time.RFC3339, r.URL.Query().Get("from"))
+	to, err2 := time.Parse(time.RFC3339, r.URL.Query().Get("to"))
+	if err1 != nil || err2 != nil || !to.After(from) {
+		writeError(w, &store.InvalidError{Msg: "统计时间范围不合法"})
+		return
+	}
+	s, err := loadSnapshot(a.store)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.monthly(from.UTC(), to.UTC()))
+}
+
 func (a *api) strategies(w http.ResponseWriter, r *http.Request) {
 	s, err := loadSnapshot(a.store)
 	if err != nil {

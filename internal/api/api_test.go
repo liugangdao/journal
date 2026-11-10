@@ -395,3 +395,63 @@ func TestJSONNamesAndUTCTimes(t *testing.T) {
 		}
 	}
 }
+
+func TestMonthly(t *testing.T) {
+	st, s := setup(t)
+	a := newStrategy(t, s)
+	b := call(t, s, "POST", "/api/strategies", `{"name":"反转","rules":"背离"}`, 201)
+	closeAt := func(strategy int64, exit float64, followed bool) int64 {
+		tr := newTrade(t, s, strategy)
+		call(t, s, "POST", fmt.Sprintf("/api/trades/%d/close", id(tr)), fmt.Sprintf(`{"exit":%v,"exit_reason":"manual","followed_rules":%v}`, exit, followed), 200)
+		return id(tr)
+	}
+	// 入场 100、止损 95：出场 110 为 +2R，95 为 -1R，90 为 -2R。
+	win := closeAt(id(a), 110, true)
+	loss := closeAt(id(a), 95, true)
+	// 旧版本与新版本的交易合并到同一策略。
+	call(t, s, "POST", fmt.Sprintf("/api/strategies/%d/versions", id(a)), `{"rules":"新规则"}`, 201)
+	win2 := closeAt(id(a), 105, true)
+	bad := closeAt(id(b), 90, false)
+	edge := closeAt(id(b), 110, true)
+	prev := closeAt(id(b), 110, true)
+	newTrade(t, s, id(a)) // 持仓中，不计入。
+	call(t, s, "PATCH", fmt.Sprintf("/api/strategies/%d", id(b)), `{"archived":true}`, 200)
+
+	d, err := st.Export()
+	if err != nil {
+		t.Fatal(err)
+	}
+	from, to := time.Date(2026, 10, 31, 16, 0, 0, 0, time.UTC), time.Date(2026, 11, 30, 16, 0, 0, 0, time.UTC)
+	at := map[int64]time.Time{win: from, loss: from.Add(time.Hour), win2: from.Add(2 * time.Hour), bad: from.Add(3 * time.Hour), edge: to, prev: from.Add(-time.Second)}
+	for i := range d.Trades {
+		if c, ok := at[d.Trades[i].ID]; ok {
+			d.Trades[i].OpenedAt = c.Add(-time.Minute)
+			d.Trades[i].ClosedAt = &c
+		}
+	}
+	if err = st.Import(d); err != nil {
+		t.Fatal(err)
+	}
+	// 用带偏移的时间传入，等价于东八区的 11 月。
+	m := call(t, s, "GET", "/api/monthly?from=2026-11-01T00:00:00%2B08:00&to=2026-12-01T00:00:00%2B08:00", "", 200)
+	if number(m, "n") != 4 || number(m, "total_r") != 0 || number(m, "win_rate") != 0.5 || number(m, "avg_win") != 1.5 || number(m, "avg_loss") != -1.5 ||
+		number(m, "max_drawdown_r") != 2 || number(m, "max_loss_streak") != 1 || number(m, "followed_rate") != 0.75 || number(m, "violated_n") != 1 || number(m, "violated_r") != -2 {
+		t.Fatal(m)
+	}
+	rows := items(m, "strategies")
+	if len(rows) != 2 {
+		t.Fatal(rows)
+	}
+	first, second := rows[0].(map[string]any), rows[1].(map[string]any)
+	if first["name"] != "趋势" || number(first, "n") != 3 || number(first, "total_r") != 2 || first["archived"] != false ||
+		second["name"] != "反转" || number(second, "n") != 1 || number(second, "total_r") != -2 || second["archived"] != true {
+		t.Fatal(rows)
+	}
+	empty := call(t, s, "GET", "/api/monthly?from=2020-01-01T00:00:00Z&to=2020-02-01T00:00:00Z", "", 200)
+	if number(empty, "n") != 0 || empty["followed_rate"] != nil || len(items(empty, "strategies")) != 0 {
+		t.Fatal(empty)
+	}
+	for _, q := range []string{"", "?from=2026-11-01T00:00:00Z", "?from=x&to=y", "?from=2026-12-01T00:00:00Z&to=2026-11-01T00:00:00Z"} {
+		call(t, s, "GET", "/api/monthly"+q, "", 400)
+	}
+}

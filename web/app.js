@@ -536,6 +536,40 @@ function strategyModal(strategy, current) {
   m.body.append(el("div", "rulebox", editing ? `修改规则或停用条件后保存，将创建 v${current.no + 1}，新版本从零开始统计；v${current.no} 保留并单独统计。只改名称不会生成新版本。` : "先写清规则；以后修改规则会创建新版本，分别统计。"), name.node, rules.node, el("div", "fgrid", recentN.node, below.node, dd.node));
 }
 
+// 月份按浏览器本地时区划分，起止时刻交给后端筛选平仓时间。
+function monthOf(hash) {
+  const now = new Date(), match = /^#monthly-(\d{4})-(\d{2})$/.exec(hash);
+  const current = new Date(now.getFullYear(), now.getMonth(), 1);
+  const picked = match && parseNum(match[2]) >= 1 && parseNum(match[2]) <= 12 ? new Date(parseNum(match[1]), parseNum(match[2]) - 1, 1) : current;
+  return { start: picked > current ? current : picked, current };
+}
+const monthHash = d => `#monthly-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+function renderMonthly(m, start, current) {
+  const shift = n => new Date(start.getFullYear(), start.getMonth() + n, 1);
+  const isCurrent = start.getTime() === current.getTime();
+  const next = button("下月 ›", () => { location.hash = monthHash(shift(1)); });
+  next.disabled = isCurrent;
+  const actions = el("div", "actions", button("‹ 上月", () => { location.hash = monthHash(shift(-1)); }), next);
+  if (!isCurrent) actions.append(button("回到本月", () => { location.hash = "#monthly"; }));
+  const has = m.n > 0, followedN = m.n - m.violated_n;
+  const cards = el("div", "panel stats");
+  [["已平仓", `${m.n} 笔`], ["累计", rfmt(has ? m.total_r : null), has && tone(m.total_r)], ["每笔期望 E", rfmt(has ? m.expectancy : null)], ["胜率", has ? pct(m.win_rate) : "—"],
+    ["平均盈利", rfmt(has && m.win_rate > 0 ? m.avg_win : null)], ["平均亏损", rfmt(has && m.win_rate < 1 ? m.avg_loss : null)], ["最大回撤", has ? ddfmt(m.max_drawdown_r) : "—"], ["最长连亏", has ? `${m.max_loss_streak} 笔` : "—"],
+    ["按规则执行率", has ? pct(m.followed_rate) : "—"], ["按规则累计", rfmt(followedN ? m.total_r - m.violated_r : null)], ["违规单", has ? `${m.violated_n} 笔` : "—"], ["违规单累计", rfmt(m.violated_n ? m.violated_r : null), m.violated_n && tone(m.violated_r)]]
+    .forEach(([label, value, cls]) => cards.append(el("div", "stat", el("small", "", label), el("b", `num ${cls || ""}`, value))));
+  const rows = el("div", "panel rows");
+  rows.append(el("div", "row head month-row", ...["策略", "累计", "期望 E"].map(v => el("div", "", v))));
+  if (!has) rows.append(empty("本月无已平仓交易。"));
+  for (const s of m.strategies) {
+    const row = link("", `#strategy-${s.id}`, "row link month-row");
+    row.append(el("div", "", el("div", "sname", s.name, s.archived ? el("em", "", "已归档") : null), el("div", "sub", `${s.n} 笔 · 胜率 ${pct(s.win_rate)}`)), rnum(s.total_r), el("div", "hide-m", rnum(s.expectancy)));
+    rows.append(row);
+  }
+  $("view").replaceChildren(
+    el("div", "d-head", el("div", "", el("h1", "", `${start.getFullYear()} 年 ${start.getMonth() + 1} 月`), el("div", "sub", `按平仓时间归月 · ${isCurrent ? "本月至今" : "整月"}`)), actions),
+    cards, el("div", "note", "一个月的样本太小，这里只看执行与结果，不判断策略有无优势。"),
+    section("按策略", rows, el("span", "sub", "各版本合并 · 含已归档")));
+}
 function renderSettings() {
   const form = el("form", "panel settings-panel");
   const risk = field("默认单笔风险（%）", overview.settings.risk_pct, "decimal");
@@ -640,13 +674,19 @@ async function route() {
       const detail = await api("GET", `/api/versions/${version.id}/stats`);
       if (sequence !== routeSequence) return;
       renderDetail(strategy, detail, current);
+    } else if (hash.startsWith("#monthly")) {
+      const { start, current } = monthOf(hash);
+      const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+      const m = await api("GET", `/api/monthly?from=${encodeURIComponent(start.toISOString())}&to=${encodeURIComponent(end.toISOString())}`);
+      if (sequence !== routeSequence) return;
+      renderMonthly(m, start, current);
     } else if (hash === "#settings") renderSettings();
     else renderHome();
     $("nav").hidden = false;
     $("new-trade").hidden = false;
     $("new-trade").disabled = !o.strategies.length;
     $("new-trade").title = o.strategies.length ? "记录开仓" : "请先新建未归档的策略";
-    document.querySelectorAll(".nav a").forEach(a => a.classList.toggle("on", a.hash === hash));
+    document.querySelectorAll(".nav a").forEach(a => a.classList.toggle("on", a.hash === hash || (a.hash === "#monthly" && hash.startsWith("#monthly"))));
     window.scrollTo(0, 0);
   } catch (error) {
     if (sequence !== routeSequence || error.status === 401) return;
