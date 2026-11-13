@@ -347,6 +347,17 @@ func TestWebFallbackAndAPIBoundary(t *testing.T) {
 	}
 }
 
+// 内嵌字体必须以 font/woff2 返回，不能依赖服务器上的系统 MIME 表。
+func TestFontContentType(t *testing.T) {
+	st, _ := setup(t)
+	h := New(st, "t0ken", fstest.MapFS{"index.html": {Data: []byte("<title>交易日志</title>")}, "fonts/a.woff2": {Data: []byte("wOF2")}})
+	r := httptest.NewRecorder()
+	h.ServeHTTP(r, httptest.NewRequest("GET", "/fonts/a.woff2", nil))
+	if r.Code != 200 || r.Header().Get("Content-Type") != "font/woff2" || r.Header().Get("ETag") == "" {
+		t.Fatal(r.Code, r.Header())
+	}
+}
+
 // 更新程序后前端要立即生效：静态文件不能被代理或浏览器按默认规则缓存数小时。
 func TestStaticRevalidates(t *testing.T) {
 	st, _ := setup(t)

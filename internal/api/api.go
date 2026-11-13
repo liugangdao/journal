@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"path"
 	"strconv"
@@ -18,6 +19,9 @@ import (
 )
 
 type api struct{ store *store.Store }
+
+// 内嵌字体的类型显式注册，不依赖服务器是否安装了 /etc/mime.types。
+func init() { _ = mime.AddExtensionType(".woff2", "font/woff2") }
 
 func New(s *store.Store, token string, web fs.FS) http.Handler {
 	a := &api{store: s}

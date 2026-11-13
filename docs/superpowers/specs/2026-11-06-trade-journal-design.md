@@ -39,7 +39,7 @@
 - 放在本仓库新目录 `journal/`，与 `research/`、`freqtrade/` 平级，是独立的 Go module（`journal/go.mod`），不影响仓库里的 Python 代码。
 - 后端：Go（1.22+，使用标准库 `net/http` 的方法 + 路径路由，不引入 Web 框架）。
 - 数据库：SQLite，驱动用纯 Go 的 `modernc.org/sqlite`（不需要 cgo，可在任意平台交叉编译 `GOOS=linux GOARCH=amd64`）。启用 WAL 模式。
-- 前端：无构建步骤的静态页面（`journal/web/` 下 HTML + CSS + 原生 JS），通过 `go:embed` 打包进可执行文件，同一进程提供页面和接口。不加载任何外部 CDN 或字体，使用系统字体栈。
+- 前端：无构建步骤的静态页面（`journal/web/` 下 HTML + CSS + 原生 JS），通过 `go:embed` 打包进可执行文件，同一进程提供页面和接口。不加载任何外部 CDN 或字体，使用系统字体栈。（2026-11-13 更新：数字与英文改用随程序内嵌的 Inter 可变字体，仅拉丁子集约 48 KB，许可证 SIL OFL 1.1 见 `web/fonts/Inter-OFL.txt`；仍不访问外网，中文继续用系统黑体。）
 - 依赖尽量少：除 SQLite 驱动外只用标准库。
 - 代码结构建议：`cmd/journal/main.go`（启动、配置）、`internal/store`（建表与读写）、`internal/stats`（纯函数统计，不依赖数据库和 HTTP）、`internal/api`（HTTP 处理与鉴权）、`web/`（前端）。
 - 鉴权：单用户口令。启动时从环境变量 `JOURNAL_TOKEN` 读取口令，未设置则拒绝启动。前端登录页输入一次后存入 `localStorage`，之后每个请求带 `Authorization: Bearer <token>`；比较口令用常量时间比较。HTTPS 由部署时的反向代理负责。
@@ -174,7 +174,7 @@
 
 - 技术栈细节：标准库 `net/http` 路由、纯 Go SQLite 驱动 `modernc.org/sqlite`、`go:embed` 内嵌无构建原生前端，放在 `journal/`（用户只定了 Go + 单文件部署）。
 - 单口令鉴权，HTTPS 交给反向代理。
-- 不用外部 CDN 和网络字体。
+- 不用外部 CDN 和网络字体（字体文件可随程序内嵌，见上文 2026-11-13 更新）。
 - 样本门槛 30 笔；bootstrap 2000 次、固定种子。
 - 盈利笔定义为 R > 0。
 - 多空提示门槛：两边各至少 10 笔。

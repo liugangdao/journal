@@ -232,7 +232,7 @@ function interval(summary) {
     bar.append(band, point);
   }
   return el("div", "interval", bar, el("div", "ci-lbl", el("span", "", "−1R"), el("span", "", "0"), el("span", "", "+1R")),
-    el("div", "sub num", summary.ci_ok ? `95% 区间 ${rfmt(summary.ci_low)} ～ ${rfmt(summary.ci_high)}` : "暂无置信区间"));
+    el("div", "sub num", ...(summary.ci_ok ? ["95% 区间 ", rnum(summary.ci_low), " ～ ", rnum(summary.ci_high)] : ["暂无置信区间"])));
 }
 function strategyRows(strategies) {
   const rows = el("div", "panel rows");
@@ -313,7 +313,7 @@ function curve(values) {
   svg.append(svgNode("path", { d: path, class: "chart-line" }));
   const last = points.length - 1;
   svg.append(svgNode("circle", { cx: x(last), cy: y(points[last]), r: 4, class: "chart-end" }));
-  svg.append(svgNode("text", { x: Math.max(100, x(last) - 8), y: Math.max(14, y(points[last]) - 10), "text-anchor": "end", class: "chart-label chart-last" }, rfmt(points[last])));
+  svg.append(svgNode("text", { x: Math.max(100, x(last) - 8), y: Math.max(14, y(points[last]) - 10), "text-anchor": "end", class: `chart-label chart-last ${tone(points[last])}` }, rfmt(points[last])));
   return el("div", "panel chart", el("div", "sec-h", el("h2", "", "累计 R"), el("span", "sub", "按平仓时间排序")), svg);
 }
 function checkCard(title, lines, message = "", warn = false) {
@@ -343,16 +343,18 @@ function renderDetail(strategy, detail, current) {
     versions.append(b);
   });
   const cards = el("div", "panel stats");
-  [["已平仓", `${s.n} 笔`], ["每笔期望 E", rfmt(s.n ? s.expectancy : null)], ["胜率", s.n ? pct(s.win_rate) : "—"], ["累计", rfmt(s.total_r)],
-    ["平均盈利", rfmt(s.n && s.win_rate > 0 ? s.avg_win : null)], ["平均亏损", rfmt(s.n && s.win_rate < 1 ? s.avg_loss : null)], ["最大回撤", ddfmt(s.max_drawdown_r)], ["最长连亏", `${s.max_loss_streak} 笔`],
-    ["R 标准差", fmt(s.std_dev)], ["95% 区间下限", rfmt(s.ci_ok ? s.ci_low : null)], ["95% 区间上限", rfmt(s.ci_ok ? s.ci_high : null)], ["版本", `v${v.no}`]]
-    .forEach(([label, value]) => cards.append(el("div", "stat", el("small", "", label), el("b", "num", value))));
+  // 带符号的 R 值：正数绿色、负数红色、零不着色。
+  const signed = n => [rfmt(n), tone(n)];
+  [["已平仓", `${s.n} 笔`], ["每笔期望 E", ...signed(s.n ? s.expectancy : null)], ["胜率", s.n ? pct(s.win_rate) : "—"], ["累计", ...signed(s.total_r)],
+    ["平均盈利", ...signed(s.n && s.win_rate > 0 ? s.avg_win : null)], ["平均亏损", ...signed(s.n && s.win_rate < 1 ? s.avg_loss : null)], ["最大回撤", ddfmt(s.max_drawdown_r)], ["最长连亏", `${s.max_loss_streak} 笔`],
+    ["R 标准差", fmt(s.std_dev)], ["95% 区间下限", ...signed(s.ci_ok ? s.ci_low : null)], ["95% 区间上限", ...signed(s.ci_ok ? s.ci_high : null)], ["版本", `v${v.no}`]]
+    .forEach(([label, value, cls]) => cards.append(el("div", "stat", el("small", "", label), el("b", `num ${cls || ""}`, value))));
   const rules = el("div", "panel rules", el("h2", "section-title", "规则与停用条件"), el("pre", "", v.rules || "未填写规则"), ...killText(v).map(text => el("div", "sub", text)), el("div", "sub", `创建于 ${date(v.created_at)}`));
   const checks = el("div", "checks",
     checkCard("多空分开", [[`做多 ${stats.sides.long_n} 笔`, rnum(stats.sides.long_n ? stats.sides.long_e : null)], [`做空 ${stats.sides.short_n} 笔`, rnum(stats.sides.short_n ? stats.sides.short_e : null)]], stats.sides.warn ? "收益可能来自单边行情" : "两边各至少 10 笔时检查单边收益。", stats.sides.warn),
     checkCard("去掉最好的 5 笔", [["原期望", rnum(s.n ? s.expectancy : null)], [`剩余 ${Math.max(0, s.n - 5)} 笔`, rnum(stats.top_removed.computed ? stats.top_removed.e : null)]], !stats.top_removed.computed ? "超过 5 笔后计算。" : stats.top_removed.warn ? "收益集中在少数几笔" : "未触发收益集中警示。", stats.top_removed.warn),
     checkCard("按规则 / 违规", [[`按规则 ${stats.rules.followed_n} 笔 · E`, rnum(stats.rules.followed_n ? stats.rules.followed_e : null)], ["按规则累计", rnum(stats.rules.followed_r)], [`违规 ${stats.rules.violated_n} 笔 · E`, rnum(stats.rules.violated_n ? stats.rules.violated_e : null)], ["违规累计", rnum(stats.rules.violated_r)]]),
-    checkCard("入场 / 出场质量", [["平均最大浮盈", rnum(stats.quality.n ? stats.quality.avg_mfe : null)], ["平均最大浮亏", rnum(stats.quality.n ? stats.quality.avg_mae : null)], ["平均利润回吐", rnum(stats.quality.n ? stats.quality.avg_giveback : null)]], `${stats.quality.n} / ${s.n} 笔填写了最高、最低价。`),
+    checkCard("入场 / 出场质量", [["平均最大浮盈", rnum(stats.quality.n ? stats.quality.avg_mfe : null)], ["平均最大浮亏", rnum(stats.quality.n ? -stats.quality.avg_mae : null)], ["平均利润回吐", rnum(stats.quality.n ? -stats.quality.avg_giveback : null)]], `${stats.quality.n} / ${s.n} 笔填写了最高、最低价。`),
     checkCard("停用条件", [["最近均值", rnum(stats.kill.recent_evaluated ? stats.kill.recent_mean : null)], ["最近 N 笔", v.kill_recent_n == null ? "未启用" : !stats.kill.recent_evaluated ? `不足 ${v.kill_recent_n} 笔，未判定` : stats.kill.recent_triggered ? "已触发" : "未触发"], ["最大回撤", ddfmt(s.max_drawdown_r)], ["回撤条件", v.kill_max_dd_r == null ? "未启用" : !stats.kill.dd_evaluated ? "未判定" : stats.kill.dd_triggered ? "已触发" : "未触发"]], killText(v).join("；"), stats.kill.triggered));
   // 拆分后样本更小，不足最少笔数的阶段整行变淡，只作参考。
   const phases = el("div", "panel rows");
@@ -363,7 +365,7 @@ function renderDetail(strategy, detail, current) {
       el("div", "", el("div", "sname", phaseName(p.phase)), el("div", "sub show-m", `${p.n} 笔 · 胜率 ${p.n ? pct(p.win_rate) : "—"}`)),
       el("div", "num hide-m", p.n), el("div", "num hide-m", p.n ? pct(p.win_rate) : "—"),
       rnum(p.n ? p.expectancy : null), el("div", "hide-m", rnum(p.n ? p.total_r : null)),
-      el("div", "num sub hide-m", p.quality_n ? `${rfmt(p.avg_mfe)} / ${rfmt(p.avg_mae)} · ${p.quality_n} 笔` : "—")));
+      el("div", "num sub hide-m", ...(p.quality_n ? [rnum(p.avg_mfe), " / ", rnum(-p.avg_mae), ` · ${p.quality_n} 笔`] : ["—"]))));
   }
   const history = el("div", "panel rows");
   [...strategy.versions].reverse().forEach(version => {
@@ -588,9 +590,9 @@ function renderMonthly(m, start, current) {
   if (!isCurrent) actions.append(button("回到本月", () => { location.hash = "#monthly"; }));
   const has = m.n > 0, followedN = m.n - m.violated_n;
   const cards = el("div", "panel stats");
-  [["已平仓", `${m.n} 笔`], ["累计", rfmt(has ? m.total_r : null), has && tone(m.total_r)], ["每笔期望 E", rfmt(has ? m.expectancy : null)], ["胜率", has ? pct(m.win_rate) : "—"],
-    ["平均盈利", rfmt(has && m.win_rate > 0 ? m.avg_win : null)], ["平均亏损", rfmt(has && m.win_rate < 1 ? m.avg_loss : null)], ["最大回撤", has ? ddfmt(m.max_drawdown_r) : "—"], ["最长连亏", has ? `${m.max_loss_streak} 笔` : "—"],
-    ["按规则执行率", has ? pct(m.followed_rate) : "—"], ["按规则累计", rfmt(followedN ? m.total_r - m.violated_r : null)], ["违规单", has ? `${m.violated_n} 笔` : "—"], ["违规单累计", rfmt(m.violated_n ? m.violated_r : null), m.violated_n && tone(m.violated_r)]]
+  [["已平仓", `${m.n} 笔`], ["累计", rfmt(has ? m.total_r : null), has && tone(m.total_r)], ["每笔期望 E", rfmt(has ? m.expectancy : null), has && tone(m.expectancy)], ["胜率", has ? pct(m.win_rate) : "—"],
+    ["平均盈利", rfmt(has && m.win_rate > 0 ? m.avg_win : null), has && m.win_rate > 0 && tone(m.avg_win)], ["平均亏损", rfmt(has && m.win_rate < 1 ? m.avg_loss : null), has && m.win_rate < 1 && tone(m.avg_loss)], ["最大回撤", has ? ddfmt(m.max_drawdown_r) : "—"], ["最长连亏", has ? `${m.max_loss_streak} 笔` : "—"],
+    ["按规则执行率", has ? pct(m.followed_rate) : "—"], ["按规则累计", rfmt(followedN ? m.total_r - m.violated_r : null), followedN && tone(m.total_r - m.violated_r)], ["违规单", has ? `${m.violated_n} 笔` : "—"], ["违规单累计", rfmt(m.violated_n ? m.violated_r : null), m.violated_n && tone(m.violated_r)]]
     .forEach(([label, value, cls]) => cards.append(el("div", "stat", el("small", "", label), el("b", `num ${cls || ""}`, value))));
   const rows = el("div", "panel rows");
   rows.append(el("div", "row head month-row", ...["策略", "累计", "期望 E"].map(v => el("div", "", v))));
@@ -729,12 +731,15 @@ async function route() {
   }
 }
 function setTheme(theme) {
-  document.documentElement.dataset.theme = theme === "dark" ? "dark" : "eye";
+  // 浅色为默认，不写 data-theme；护眼与深色各有一组变量。
+  theme = ["eye", "dark"].includes(theme) ? theme : "light";
+  if (theme === "light") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
   remember("journal-theme", theme);
   document.querySelectorAll("[data-theme-set]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themeSet === theme)));
 }
 document.querySelectorAll("[data-theme-set]").forEach(b => b.addEventListener("click", () => setTheme(b.dataset.themeSet)));
-setTheme(stored("journal-theme") === "dark" ? "dark" : "eye");
+setTheme(stored("journal-theme"));
 $("new-trade").addEventListener("click", () => tradeModal("open"));
 // 弹窗只能点 × 或"取消"关闭；点外面、按 Esc 都不关，避免误触丢掉已填内容。
 document.addEventListener("keydown", event => {
