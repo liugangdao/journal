@@ -4,3 +4,5 @@
 *.db-shm
 /journal
 .superpowers/
+# 本地部署笔记（仓库公开，不提交）
+deploy/NOTES.local.md

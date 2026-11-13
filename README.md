@@ -43,7 +43,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o journal ./cmd/journal
 
 ## 服务器部署
 
-以下是交付操作示例，本次开发不会执行服务器部署。将 `server` 换成自己的主机。在本地从本目录上传：
+以下 `server` 换成目标主机的 SSH 别名。具体线上环境不写进仓库，记在本地的 `deploy/NOTES.local.md`（已加入 `.gitignore`）。在本地从本目录上传：
 
 ```sh
 scp journal deploy/journal.service deploy/journal.env.example server:/tmp/
@@ -104,7 +104,24 @@ sudo systemctl start journal
 
 将域名解析到服务器，通过 HTTPS 访问。应用监听回环地址，由反向代理提供公网入口。
 
-Caddy 的最小站点配置（替换域名；开放 80 / 443 端口）：
+域名在 Cloudflare 并开启代理时，可以使用 Cloudflare 源站证书（Origin Certificate），Caddy 不自行申请证书，只需开放 443。在 Cloudflare 的 SSL/TLS → Origin Server 生成证书，保存为 `/etc/caddy/origin-cert.pem` 和 `/etc/caddy/origin-key.pem`，属主 `root:caddy`，私钥权限 640。站点配置（替换域名）：
+
+```caddyfile
+journal.example.com {
+    tls /etc/caddy/origin-cert.pem /etc/caddy/origin-key.pem
+    reverse_proxy 127.0.0.1:8800
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+}
+```
+
+修改后用 `sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile` 检查，再 `sudo systemctl reload caddy`。源站证书只被 Cloudflare 信任，绕过 Cloudflare 直连源站测试时，curl 需加 `-k` 和 `--resolve 域名:443:源站IP`。系统防火墙（如 iptables）和云厂商安全组都要放行 443。
+
+不经过 Cloudflare、由 Caddy 自动申请证书时，最小站点配置如下（替换域名；开放 80 / 443 端口）：
 
 ```caddyfile
 journal.example.com {
