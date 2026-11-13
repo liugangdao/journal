@@ -736,10 +736,9 @@ function setTheme(theme) {
 document.querySelectorAll("[data-theme-set]").forEach(b => b.addEventListener("click", () => setTheme(b.dataset.themeSet)));
 setTheme(stored("journal-theme") === "dark" ? "dark" : "eye");
 $("new-trade").addEventListener("click", () => tradeModal("open"));
-$("modal").addEventListener("click", event => { if (event.target === $("modal")) closeModal(); });
+// 弹窗只能点 × 或"取消"关闭；点外面、按 Esc 都不关，避免误触丢掉已填内容。
 document.addEventListener("keydown", event => {
   if ($("modal").hidden) return;
-  if (event.key === "Escape") closeModal();
   if (event.key === "Tab") {
     const focusable = [...$("modal").querySelectorAll("button,input,textarea,select,summary,a[href]")].filter(n => !n.disabled && n.getClientRects().length);
     if (!focusable.length) { event.preventDefault(); return; }
