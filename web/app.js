@@ -52,6 +52,9 @@ const date = value => value ? new Date(value).toLocaleString("zh-CN", { hour12: 
 const num = (text, cls = "") => el("span", `num ${cls}`, text);
 const rnum = n => num(rfmt(n), tone(n));
 const empty = text => el("div", "empty sub", text);
+// 开仓时判断的趋势阶段；旧交易没有记录，显示"未记录"。
+const PHASES = [["early", "前期", "趋势刚启动"], ["mid", "中期", "趋势延续中"], ["late", "后期", "趋势末端"], ["unsure", "不确定", "看不清阶段"]];
+const phaseName = p => (PHASES.find(([key]) => key === p) || [, "未记录"])[1];
 function notice(text, bad = false) {
   $("notice").textContent = text;
   $("notice").className = bad ? "note neg" : "note";
@@ -120,6 +123,19 @@ function selectField(label, options, value, full = false) {
   select.value = value;
   f.input.replaceWith(select);
   return { node: f.node, input: select };
+}
+function phasePicker() {
+  const box = el("fieldset", "f full phase-pick");
+  const group = `phase-${++fieldSequence}`;
+  box.append(el("legend", "", "趋势阶段（必选，开仓后不可修改）"));
+  const seg = el("div", "phase-seg");
+  for (const [key, name, hint] of PHASES) {
+    const input = el("input");
+    input.type = "radio"; input.name = group; input.value = key;
+    seg.append(el("label", "", input, el("b", "", name), el("small", "", hint)));
+  }
+  box.append(seg);
+  return { node: box, value: () => box.querySelector("input:checked")?.value || "" };
 }
 function checkbox(label, checked) {
   const input = el("input");
@@ -243,7 +259,7 @@ function renderHome() {
   if (!o.open_trades.length) open.append(empty("暂无持仓。记下开仓理由，再开始跟踪。"));
   for (const trade of o.open_trades) {
     open.append(el("div", "row pos-row",
-      el("div", "", el("div", "sname num", trade.symbol), el("div", "sub", `${trade.strategy_name} · v${trade.version_no}`), el("div", "sub", date(trade.opened_at))),
+      el("div", "", el("div", "sname num", trade.symbol), el("div", "sub", `${trade.strategy_name} · v${trade.version_no} · ${phaseName(trade.phase)}`), el("div", "sub", date(trade.opened_at))),
       el("div", "hide-m", el("span", `side ${trade.side}`, trade.side === "long" ? "多" : "空")),
       el("div", "num hide-m", fmt(trade.entry, 8)), el("div", "num hide-m", fmt(trade.stop, 8)),
       el("div", "num hide-m", `${fmt(trade.risk_amount)} U`),
@@ -338,6 +354,17 @@ function renderDetail(strategy, detail, current) {
     checkCard("按规则 / 违规", [[`按规则 ${stats.rules.followed_n} 笔 · E`, rnum(stats.rules.followed_n ? stats.rules.followed_e : null)], ["按规则累计", rnum(stats.rules.followed_r)], [`违规 ${stats.rules.violated_n} 笔 · E`, rnum(stats.rules.violated_n ? stats.rules.violated_e : null)], ["违规累计", rnum(stats.rules.violated_r)]]),
     checkCard("入场 / 出场质量", [["平均最大浮盈", rnum(stats.quality.n ? stats.quality.avg_mfe : null)], ["平均最大浮亏", rnum(stats.quality.n ? stats.quality.avg_mae : null)], ["平均利润回吐", rnum(stats.quality.n ? stats.quality.avg_giveback : null)]], `${stats.quality.n} / ${s.n} 笔填写了最高、最低价。`),
     checkCard("停用条件", [["最近均值", rnum(stats.kill.recent_evaluated ? stats.kill.recent_mean : null)], ["最近 N 笔", v.kill_recent_n == null ? "未启用" : !stats.kill.recent_evaluated ? `不足 ${v.kill_recent_n} 笔，未判定` : stats.kill.recent_triggered ? "已触发" : "未触发"], ["最大回撤", ddfmt(s.max_drawdown_r)], ["回撤条件", v.kill_max_dd_r == null ? "未启用" : !stats.kill.dd_evaluated ? "未判定" : stats.kill.dd_triggered ? "已触发" : "未触发"]], killText(v).join("；"), stats.kill.triggered));
+  // 拆分后样本更小，不足最少笔数的阶段整行变淡，只作参考。
+  const phases = el("div", "panel rows");
+  phases.append(el("div", "row head phase-row", ...["阶段", "笔数", "胜率", "期望 E", "累计", "平均浮盈 / 浮亏"].map(v => el("div", "", v))));
+  for (const p of detail.phases) {
+    const thin = p.n < overview.settings.min_sample;
+    phases.append(el("div", `row phase-row${thin ? " thin" : ""}`,
+      el("div", "", el("div", "sname", phaseName(p.phase)), el("div", "sub show-m", `${p.n} 笔 · 胜率 ${p.n ? pct(p.win_rate) : "—"}`)),
+      el("div", "num hide-m", p.n), el("div", "num hide-m", p.n ? pct(p.win_rate) : "—"),
+      rnum(p.n ? p.expectancy : null), el("div", "hide-m", rnum(p.n ? p.total_r : null)),
+      el("div", "num sub hide-m", p.quality_n ? `${rfmt(p.avg_mfe)} / ${rfmt(p.avg_mae)} · ${p.quality_n} 笔` : "—")));
+  }
   const history = el("div", "panel rows");
   [...strategy.versions].reverse().forEach(version => {
     const row = link("", `#strategy-${strategy.id}-v${version.no}`, "row link history-row");
@@ -348,7 +375,7 @@ function renderDetail(strategy, detail, current) {
   if (!detail.trades.length) trades.append(empty("这个版本还没有交易。"));
   for (const trade of detail.trades) {
     const row = button("", () => tradeModal("edit", trade, readonly), "row link trade-row trade-button");
-    row.append(el("div", "", el("div", "sname num", trade.symbol), el("div", "sub", date(trade.opened_at))),
+    row.append(el("div", "", el("div", "sname num", trade.symbol), el("div", "sub", date(trade.opened_at), " · ", el("span", "nowrap", phaseName(trade.phase)))),
       el("div", "hide-m", el("span", `side ${trade.side}`, trade.side === "long" ? "多" : "空")),
       el("div", "num hide-m", fmt(trade.entry, 8)), el("div", "num hide-m", fmt(trade.exit, 8)),
       el("div", "", trade.status === "open" ? el("span", "tag t-idle", "持仓中") : rnum(trade.r)),
@@ -357,7 +384,8 @@ function renderDetail(strategy, detail, current) {
     trades.append(row);
   }
   $("view").replaceChildren(link("‹ 策略面板", "#home", "back"), el("div", "d-head", el("div", "", el("h1", "", strategy.name, num(`v${v.no}`), verdict(stats)), el("div", "sub", `${readonly ? "历史版本只读 · 单独统计" : "当前版本"}${strategy.archived ? " · 已归档" : ""}`)), actions), versions,
-    cards, el("div", "grid2", curve(s.curve), rules), section("附加检验", checks), section("版本历史", history), section(`v${v.no} 交易`, trades, el("span", "sub", readonly ? "点击查看 · 历史版本只读" : "点击修改或删除")));
+    cards, el("div", "grid2", curve(s.curve), rules), section("附加检验", checks),
+    section("按趋势阶段", phases, el("span", "sub", `按开仓时的判断拆分 · 不足 ${overview.settings.min_sample} 笔的阶段变淡，仅供参考`)), section("版本历史", history), section(`v${v.no} 交易`, trades, el("span", "sub", readonly ? "点击查看 · 历史版本只读" : "点击修改或删除")));
 }
 
 async function saved(message) {
@@ -387,7 +415,11 @@ function tradeModal(mode, trade = {}, readonly = false) {
       body.qty = opening && !f.qty.input.value.trim() ? suggested() : numberOf(f.qty.input, "实际数量");
       if (![body.entry, body.stop, body.equity, body.risk_pct, body.qty].every(n => Number.isFinite(n) && n > 0)) throw new Error("价格、权益、风险比例和数量必须大于 0");
       if (body.side === "long" ? body.stop >= body.entry : body.stop <= body.entry) throw new Error("止损必须在入场价的亏损一侧");
-      if (opening) body.strategy_id = numberOf(f.strategy.input, "策略");
+      if (opening) {
+        body.strategy_id = numberOf(f.strategy.input, "策略");
+        body.phase = f.phase.value();
+        if (!body.phase) throw new Error("请选择开仓时的趋势阶段");
+      }
     }
     if (hasClose) {
       body.exit = numberOf(f.exit.input, "出场价");
@@ -427,6 +459,7 @@ function tradeModal(mode, trade = {}, readonly = false) {
     m.body.append(f.strategy.node, rule);
   } else {
     m.body.append(el("div", "sub num", `开仓 ${date(trade.opened_at)}${trade.closed_at ? ` · 平仓 ${date(trade.closed_at)}` : ""}`));
+    if (!closing) m.body.append(el("div", "rulebox", `趋势阶段：${phaseName(trade.phase)}（开仓时记录，不可修改）`));
   }
   if (!closing) {
     f.side = selectField("方向", [["long", "做多"], ["short", "做空"]], trade.side || "long");
@@ -436,7 +469,7 @@ function tradeModal(mode, trade = {}, readonly = false) {
       addField("risk_pct", "单笔风险（%）", opening ? overview.settings.risk_pct : trade.risk_pct));
     m.body.append(grid);
   } else {
-    m.body.append(el("div", "rulebox num", `${trade.side === "long" ? "做多" : "做空"} · 入场 ${fmt(trade.entry, 8)} · 止损 ${fmt(trade.stop, 8)} · 数量 ${fmt(trade.qty, 8)} · 1R ${fmt(trade.qty * Math.abs(trade.entry - trade.stop))} U`));
+    m.body.append(el("div", "rulebox num", `${trade.side === "long" ? "做多" : "做空"} · ${phaseName(trade.phase)} · 入场 ${fmt(trade.entry, 8)} · 止损 ${fmt(trade.stop, 8)} · 数量 ${fmt(trade.qty, 8)} · 1R ${fmt(trade.qty * Math.abs(trade.entry - trade.stop))} U`));
   }
   const calc = el("div", "calc");
   const riskValue = el("b", "num", "—"), qtyValue = el("b", "num", "—"), nominalValue = el("b", "num", "—");
@@ -444,7 +477,9 @@ function tradeModal(mode, trade = {}, readonly = false) {
   stopError.hidden = true;
   if (!closing) {
     calc.append(...[["1R（实际数量）", riskValue], ["建议数量", qtyValue], ["名义价值", nominalValue]].map(([label, value]) => el("div", "", el("small", "", label), value)));
-    m.body.append(calc, stopError, addField("qty", opening ? "实际数量（留空使用建议值）" : "实际数量", trade.qty), addField("entry_reason", "入场理由（必填，下单前写）", trade.entry_reason, "textarea"));
+    m.body.append(calc, stopError, addField("qty", opening ? "实际数量（留空使用建议值）" : "实际数量", trade.qty));
+    if (opening) { f.phase = phasePicker(); m.body.append(f.phase.node); }
+    m.body.append(addField("entry_reason", "入场理由（必填，下单前写）", trade.entry_reason, "textarea"));
   }
   const preview = el("div", "bigR num", "—");
   if (hasClose) {

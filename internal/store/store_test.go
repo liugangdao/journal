@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"math"
@@ -33,7 +34,7 @@ func strategy(t *testing.T, s *Store) (Strategy, Version) {
 	return a, v
 }
 func input(id int64) OpenInput {
-	return OpenInput{StrategyID: id, Symbol: " btc ", Side: stats.Long, Entry: 100, Stop: 95, Equity: 10000, RiskPct: 1, EntryReason: " 趋势突破 "}
+	return OpenInput{StrategyID: id, Symbol: " btc ", Side: stats.Long, Entry: 100, Stop: 95, Equity: 10000, RiskPct: 1, EntryReason: " 趋势突破 ", Phase: "mid"}
 }
 func openTrade(t *testing.T, s *Store, id int64) Trade {
 	t.Helper()
@@ -408,7 +409,7 @@ func TestImportValidationAtomic(t *testing.T) {
 	openTrade(t, s, a.ID)
 	before := dump(t, s)
 	for _, change := range []func(*Dump){
-		func(d *Dump) { d.SchemaVersion = 2 }, func(d *Dump) { d.Settings.MinSample = 1 }, func(d *Dump) { d.Strategies = append(d.Strategies, d.Strategies[0]) },
+		func(d *Dump) { d.SchemaVersion = 3 }, func(d *Dump) { d.Settings.MinSample = 1 }, func(d *Dump) { d.Strategies = append(d.Strategies, d.Strategies[0]) },
 		func(d *Dump) { d.Versions = append(d.Versions, d.Versions[0]) }, func(d *Dump) { d.Trades = append(d.Trades, d.Trades[0]) }, func(d *Dump) { d.Trades[0].Stop = 100 },
 		func(d *Dump) { d.Trades[0].Qty = 0 }, func(d *Dump) { d.Trades[0].Status = "closed" }, func(d *Dump) { d.Trades[0].Status = "unknown" }, func(d *Dump) { d.Trades[0].OpenedAt = time.Time{} },
 		func(d *Dump) { d.Trades[0].Exit = ptr(110.0) }, func(d *Dump) { d.Strategies[0].ID = 0 }, func(d *Dump) { d.Versions = nil },
@@ -576,4 +577,95 @@ func TestConcurrentCloseAcrossConnections(t *testing.T) {
 	if success != 1 || conflict != 1 {
 		t.Fatalf("跨连接平仓成功 %d，冲突 %d", success, conflict)
 	}
+}
+
+func TestTradePhase(t *testing.T) {
+	s := newStore(t)
+	a, _ := strategy(t, s)
+	for _, p := range []string{"", "Mid", "begin"} {
+		in := input(a.ID)
+		in.Phase = p
+		_, err := s.OpenTrade(in)
+		invalid(t, err)
+	}
+	for _, p := range Phases {
+		in := input(a.ID)
+		in.Phase = p
+		tr, err := s.OpenTrade(in)
+		if err != nil || tr.Phase == nil || *tr.Phase != p {
+			t.Fatalf("阶段 %s：%v %v", p, tr.Phase, err)
+		}
+	}
+	tr := openTrade(t, s, a.ID)
+	// 补丁和平仓都不改变开仓时记录的阶段。
+	if _, err := s.UpdateTrade(tr.ID, TradePatch{Symbol: ptr("ETH")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CloseTrade(tr.ID, CloseInput{Exit: 110, ExitReason: "target", FollowedRules: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := getTrade(s.db, tr.ID)
+	if err != nil || got.Phase == nil || *got.Phase != "mid" || got.Symbol != "ETH" {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+func TestMigrateV1Database(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened := timestamp(now())
+	for _, q := range []string{schema,
+		"INSERT INTO strategies VALUES(1,'旧策略',0,'" + opened + "')",
+		"INSERT INTO strategy_versions(id,strategy_id,no,rules,created_at) VALUES(1,1,1,'','" + opened + "')",
+		"INSERT INTO trades(id,version_id,symbol,side,entry,stop,equity,risk_pct,qty,entry_reason,opened_at,status,review_note) VALUES(1,1,'BTC','long',100,95,10000,1,2,'旧理由','" + opened + "','open','')",
+	} {
+		if _, err := raw.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw.Close()
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var version int
+	if err := s.db.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil || version != 2 {
+		t.Fatalf("版本 %d %v", version, err)
+	}
+	d := dump(t, s)
+	if len(d.Trades) != 1 || d.Trades[0].Phase != nil || d.SchemaVersion != 2 {
+		t.Fatalf("%+v", d)
+	}
+	// 迁移后再次打开不重复迁移。
+	s.Close()
+	if s, err = Open(path); err != nil {
+		t.Fatal(err)
+	}
+	tr := openTrade(t, s, 1)
+	if *tr.Phase != "mid" {
+		t.Fatal(tr.Phase)
+	}
+}
+
+func TestImportPhase(t *testing.T) {
+	s := newStore(t)
+	a, _ := strategy(t, s)
+	openTrade(t, s, a.ID)
+	d := dump(t, s)
+	old := clone(d)
+	old.SchemaVersion = 1
+	old.Trades[0].Phase = nil
+	if err := s.Import(old); err != nil {
+		t.Fatal(err)
+	}
+	if got := dump(t, s); got.Trades[0].Phase != nil {
+		t.Fatal(got.Trades[0].Phase)
+	}
+	bad := clone(d)
+	bad.Trades[0].Phase = ptr("peak")
+	invalid(t, s.Import(bad))
 }

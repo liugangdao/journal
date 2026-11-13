@@ -143,7 +143,7 @@ func (a *api) versionStats(w http.ResponseWriter, r *http.Request) {
 		writeError(w, store.ErrNotFound)
 		return
 	}
-	out := versionDetail{Version: v, Strategy: s.strategies[v.StrategyID], Stats: s.compute(v), Trades: []tradeView{}}
+	out := versionDetail{Version: v, Strategy: s.strategies[v.StrategyID], Stats: s.compute(v), Phases: s.phases(v), Trades: []tradeView{}}
 	for _, t := range s.trades[id] {
 		out.Trades = append(out.Trades, viewTrade(t))
 	}

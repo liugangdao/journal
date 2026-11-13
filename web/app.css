@@ -203,6 +203,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .row.link{color:inherit;text-decoration:none}
 .sname,.sub,.rules pre,.preserve,.d-head h1,.sheet-h h2{overflow-wrap:anywhere}
 .preserve{white-space:pre-wrap}
+.nowrap{white-space:nowrap}
 .empty{padding:24px 16px}
 .actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .c-t{display:flex;align-items:center;gap:6px}
@@ -212,6 +213,19 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .section-title{margin:0;font-size:16px}
 .month-row{grid-template-columns:minmax(0,2fr) 1fr 1fr}
 .history-row{grid-template-columns:.4fr 1.2fr .5fr .7fr minmax(0,2fr)}
+.phase-row{grid-template-columns:1fr .6fr .8fr .9fr .9fr minmax(0,1.6fr)}
+.phase-row.thin>*{opacity:.55}
+.phase-row .show-m{display:none}
+.phase-pick{border:0;margin:0;padding:0;min-width:0}
+.phase-pick legend{font-size:12px;color:var(--muted);padding:0;margin-bottom:5px}
+.phase-seg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--line-2);border-radius:8px;overflow:hidden}
+.phase-seg label{display:grid;gap:1px;text-align:center;padding:8px 6px;cursor:pointer;border-left:1px solid var(--line-2);color:var(--muted)}
+.phase-seg label:first-child{border-left:0}
+.phase-seg input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.phase-seg b{color:inherit;font-weight:inherit}
+.phase-seg small{font-size:11px;color:var(--faint)}
+.phase-seg label:has(input:checked){background:var(--panel-2);color:var(--fg);font-weight:600;box-shadow:inset 0 -2px 0 var(--accent)}
+.phase-seg label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:-2px}
 .trade-button{width:100%;border:0;border-top:1px solid var(--line);background:transparent;text-align:left;border-radius:0}
 .trade-button:first-child{border-top:0}
 .rows{overflow:hidden}
@@ -236,6 +250,12 @@ button:disabled{opacity:.5;cursor:not-allowed}
   .history-row{grid-template-columns:1fr 1fr}
   .history-row>:last-child{grid-column:1/-1}
   .month-row{grid-template-columns:minmax(0,1fr) auto}
+  .phase-row{grid-template-columns:minmax(0,1fr) auto}
+  .phase-row .hide-m{display:none}
+  .phase-row .show-m{display:block}
+  .phase-seg{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .phase-seg label:nth-child(3){border-left:0}
+  .phase-seg label:nth-child(n+3){border-top:1px solid var(--line-2)}
   .month-row .hide-m{display:none}
   .sec-h{flex-wrap:wrap}
   .d-head h1{font-size:20px}

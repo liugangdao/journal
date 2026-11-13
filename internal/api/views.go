@@ -38,7 +38,18 @@ type versionDetail struct {
 	Version  store.Version      `json:"version"`
 	Strategy store.Strategy     `json:"strategy"`
 	Stats    stats.VersionStats `json:"stats"`
+	Phases   []phaseView        `json:"phases"`
 	Trades   []tradeView        `json:"trades"`
+}
+type phaseView struct {
+	Phase      string  `json:"phase"`
+	N          int     `json:"n"`
+	WinRate    float64 `json:"win_rate"`
+	Expectancy float64 `json:"expectancy"`
+	TotalR     float64 `json:"total_r"`
+	QualityN   int     `json:"quality_n"`
+	AvgMFE     float64 `json:"avg_mfe"`
+	AvgMAE     float64 `json:"avg_mae"`
 }
 type totalsView struct {
 	ClosedN      int      `json:"closed_n"`
@@ -118,6 +129,33 @@ func (s snapshot) compute(v store.Version) stats.VersionStats {
 		}
 	}
 	return stats.Compute(closed, stats.KillRule{RecentN: v.KillRecentN, RecentBelow: v.KillRecentBelow, MaxDDR: v.KillMaxDDR}, s.dump.Settings.MinSample)
+}
+
+// phases 按开仓时的趋势阶段拆分已平仓交易。拆分后样本更小，只给描述性数字；
+// 四个阶段总是列出，旧交易未记录阶段时追加 phase 为空的一行。
+func (s snapshot) phases(v store.Version) []phaseView {
+	by := map[string][]stats.ClosedTrade{}
+	for _, tr := range s.trades[v.ID] {
+		if tr.Status != "closed" {
+			continue
+		}
+		key := ""
+		if tr.Phase != nil {
+			key = *tr.Phase
+		}
+		by[key] = append(by[key], closedTrade(tr))
+	}
+	keys := append([]string(nil), store.Phases...)
+	if len(by[""]) > 0 {
+		keys = append(keys, "")
+	}
+	out := make([]phaseView, 0, len(keys))
+	for _, key := range keys {
+		st := stats.Compute(by[key], stats.KillRule{}, 0)
+		out = append(out, phaseView{Phase: key, N: st.Summary.N, WinRate: st.Summary.WinRate, Expectancy: st.Summary.Expectancy, TotalR: st.Summary.TotalR,
+			QualityN: st.Quality.N, AvgMFE: st.Quality.AvgMFE, AvgMAE: st.Quality.AvgMAE})
+	}
+	return out
 }
 func (s snapshot) strategyView(a store.Strategy) strategyView {
 	v := s.current[a.ID]

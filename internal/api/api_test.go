@@ -82,7 +82,7 @@ func newStrategy(t *testing.T, s *httptest.Server) map[string]any {
 }
 func newTrade(t *testing.T, s *httptest.Server, strategy int64) map[string]any {
 	t.Helper()
-	return call(t, s, "POST", "/api/trades", fmt.Sprintf(`{"strategy_id":%d,"symbol":"btc","side":"long","entry":100,"stop":95,"equity":10000,"risk_pct":1,"qty":0,"entry_reason":"突破"}`, strategy), 201)
+	return call(t, s, "POST", "/api/trades", fmt.Sprintf(`{"strategy_id":%d,"symbol":"btc","side":"long","entry":100,"stop":95,"equity":10000,"risk_pct":1,"qty":0,"entry_reason":"突破","phase":"early"}`, strategy), 201)
 }
 
 func TestAuthRequired(t *testing.T) {
@@ -149,7 +149,7 @@ func TestOpenTradeRejectsBadNumbers(t *testing.T) {
 	_, s := setup(t)
 	a := newStrategy(t, s)
 	for _, field := range []string{`"entry":0`, `"entry":-1`, `"entry":"abc"`, `"entry":"68,420.5"`, `"entry":1e999`, `"entry":null`, `"entry":100,"qty":-1`, `"entry":100,"equity":0`, `"entry":100,"stop":100`} {
-		body := fmt.Sprintf(`{"strategy_id":%d,"symbol":"BTC","side":"long","stop":95,"equity":10000,"risk_pct":1,"entry_reason":"突破",%s}`, id(a), field)
+		body := fmt.Sprintf(`{"strategy_id":%d,"symbol":"BTC","side":"long","stop":95,"equity":10000,"risk_pct":1,"entry_reason":"突破","phase":"early",%s}`, id(a), field)
 		call(t, s, "POST", "/api/trades", body, 400)
 	}
 	o := call(t, s, "GET", "/api/overview", "", 200)
@@ -453,5 +453,39 @@ func TestMonthly(t *testing.T) {
 	}
 	for _, q := range []string{"", "?from=2026-11-01T00:00:00Z", "?from=x&to=y", "?from=2026-12-01T00:00:00Z&to=2026-11-01T00:00:00Z"} {
 		call(t, s, "GET", "/api/monthly"+q, "", 400)
+	}
+}
+
+func TestPhaseSplitAndReadonly(t *testing.T) {
+	_, s := setup(t)
+	a := newStrategy(t, s)
+	call(t, s, "POST", "/api/trades", fmt.Sprintf(`{"strategy_id":%d,"symbol":"btc","side":"long","entry":100,"stop":95,"equity":10000,"risk_pct":1,"entry_reason":"突破"}`, id(a)), 400)
+	call(t, s, "POST", "/api/trades", fmt.Sprintf(`{"strategy_id":%d,"symbol":"btc","side":"long","entry":100,"stop":95,"equity":10000,"risk_pct":1,"entry_reason":"突破","phase":"top"}`, id(a)), 400)
+	early := newTrade(t, s, id(a))
+	late := call(t, s, "POST", "/api/trades", fmt.Sprintf(`{"strategy_id":%d,"symbol":"eth","side":"long","entry":100,"stop":95,"equity":10000,"risk_pct":1,"entry_reason":"末端追","phase":"late"}`, id(a)), 201)
+	newTrade(t, s, id(a))
+	call(t, s, "POST", fmt.Sprintf("/api/trades/%d/close", id(early)), `{"exit":110,"exit_reason":"target","followed_rules":true,"high":112,"low":99}`, 200)
+	call(t, s, "POST", fmt.Sprintf("/api/trades/%d/close", id(late)), `{"exit":95,"exit_reason":"stop","followed_rules":true}`, 200)
+	// 补丁不接受阶段字段，开仓后阶段只读。
+	call(t, s, "PATCH", fmt.Sprintf("/api/trades/%d", id(late)), `{"phase":"early"}`, 400)
+	result := call(t, s, "GET", fmt.Sprintf("/api/versions/%d/stats", int64(number(early, "version_id"))), "", 200)
+	phases := items(result, "phases")
+	if len(phases) != 4 {
+		t.Fatal(phases)
+	}
+	want := []struct {
+		phase string
+		n     float64
+		e     float64
+		q     float64
+	}{{"early", 1, 2, 1}, {"mid", 0, 0, 0}, {"late", 1, -1, 0}, {"unsure", 0, 0, 0}}
+	for i, w := range want {
+		p := phases[i].(map[string]any)
+		if p["phase"] != w.phase || number(p, "n") != w.n || number(p, "expectancy") != w.e || number(p, "quality_n") != w.q {
+			t.Fatalf("%d：%v", i, p)
+		}
+	}
+	if items(result, "trades")[0].(map[string]any)["phase"] == nil {
+		t.Fatal("交易缺少阶段")
 	}
 }

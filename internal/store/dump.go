@@ -16,7 +16,7 @@ type Dump struct {
 
 // Export 在同一事务内读取，避免导出期间写入造成跨表不一致。
 func (s *Store) Export() (Dump, error) {
-	d := Dump{SchemaVersion: 1}
+	d := Dump{SchemaVersion: 2}
 	err := s.transaction(func(tx *sql.Tx) error {
 		var err error
 		d.Settings, err = getSettings(tx)
@@ -38,7 +38,8 @@ func (s *Store) Export() (Dump, error) {
 }
 
 func validateDump(d *Dump) error {
-	if d.SchemaVersion != 1 {
+	// 版本 1 的备份没有趋势阶段，导入后视为未记录。
+	if d.SchemaVersion != 1 && d.SchemaVersion != 2 {
 		return invalidError("不支持此备份版本")
 	}
 	if err := validateSettings(d.Settings); err != nil {

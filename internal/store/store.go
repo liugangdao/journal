@@ -106,7 +106,17 @@ func Open(path string) (*Store, error) {
 		if err := tx.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil {
 			return err
 		}
-		if version != 1 {
+		// 版本 1 → 2：交易增加开仓时的趋势阶段，旧交易保持为空（未记录）。
+		if version == 1 {
+			if _, err := tx.Exec("ALTER TABLE trades ADD COLUMN phase TEXT"); err != nil {
+				return err
+			}
+			if _, err := tx.Exec("UPDATE schema_version SET version=2"); err != nil {
+				return err
+			}
+			version = 2
+		}
+		if version != 2 {
 			return invalidError("不支持此数据库版本")
 		}
 		return nil

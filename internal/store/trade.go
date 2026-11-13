@@ -20,6 +20,7 @@ type OpenInput struct {
 	RiskPct     float64    `json:"risk_pct"`
 	Qty         float64    `json:"qty"`
 	EntryReason string     `json:"entry_reason"`
+	Phase       string     `json:"phase"`
 }
 type CloseInput struct {
 	Exit          float64  `json:"exit"`
@@ -59,6 +60,7 @@ type Trade struct {
 	RiskPct       float64    `json:"risk_pct"`
 	Qty           float64    `json:"qty"`
 	EntryReason   string     `json:"entry_reason"`
+	Phase         *string    `json:"phase"`
 	OpenedAt      time.Time  `json:"opened_at"`
 	Status        string     `json:"status"`
 	Exit          *float64   `json:"exit"`
@@ -75,11 +77,27 @@ type TradeFilter struct {
 	Status    string `json:"status"`
 }
 
+// 趋势阶段在开仓时选定，之后不可修改，避免按结果回头改判断。
+// 旧数据没有记录阶段，存为空。
+var Phases = []string{"early", "mid", "late", "unsure"}
+
+func validPhase(p string) bool {
+	for _, v := range Phases {
+		if p == v {
+			return true
+		}
+	}
+	return false
+}
+
 func validateOpen(t *Trade) error {
 	t.Symbol = strings.ToUpper(strings.TrimSpace(t.Symbol))
 	t.EntryReason = strings.TrimSpace(t.EntryReason)
 	if t.Symbol == "" || t.EntryReason == "" {
 		return invalidError("品种和入场理由不能为空")
+	}
+	if t.Phase != nil && !validPhase(*t.Phase) {
+		return invalidError("趋势阶段只能是 early、mid、late 或 unsure")
 	}
 	if !positive(t.Entry) || !positive(t.Stop) || !positive(t.Equity) || !positive(t.RiskPct) || !positive(t.Qty) {
 		return invalidError("价格、权益、风险比例和数量必须是大于 0 的有限数字")
@@ -162,14 +180,14 @@ func validateTrade(t *Trade) error {
 	return nil
 }
 
-const tradeColumns = "id,version_id,symbol,side,entry,stop,equity,risk_pct,qty,entry_reason,opened_at,status,exit,exit_reason,followed_rules,review_note,high,low,funding,closed_at"
-const tradeValues = "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?"
+const tradeColumns = "id,version_id,symbol,side,entry,stop,equity,risk_pct,qty,entry_reason,phase,opened_at,status,exit,exit_reason,followed_rules,review_note,high,low,funding,closed_at"
+const tradeValues = "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?"
 
 func scanTrade(row scanner) (Trade, error) {
 	var t Trade
 	var opened string
 	var closed *string
-	err := row.Scan(&t.ID, &t.VersionID, &t.Symbol, &t.Side, &t.Entry, &t.Stop, &t.Equity, &t.RiskPct, &t.Qty, &t.EntryReason, &opened, &t.Status, &t.Exit, &t.ExitReason, &t.FollowedRules, &t.ReviewNote, &t.High, &t.Low, &t.Funding, &closed)
+	err := row.Scan(&t.ID, &t.VersionID, &t.Symbol, &t.Side, &t.Entry, &t.Stop, &t.Equity, &t.RiskPct, &t.Qty, &t.EntryReason, &t.Phase, &opened, &t.Status, &t.Exit, &t.ExitReason, &t.FollowedRules, &t.ReviewNote, &t.High, &t.Low, &t.Funding, &closed)
 	if err != nil {
 		return t, dbError(err)
 	}
@@ -191,14 +209,17 @@ func tradeArgs(t Trade) []any {
 	if t.ClosedAt != nil {
 		closed = timestamp(*t.ClosedAt)
 	}
-	return []any{t.ID, t.VersionID, t.Symbol, t.Side, t.Entry, t.Stop, t.Equity, t.RiskPct, t.Qty, t.EntryReason, timestamp(t.OpenedAt), t.Status, t.Exit, t.ExitReason, t.FollowedRules, t.ReviewNote, t.High, t.Low, t.Funding, closed}
+	return []any{t.ID, t.VersionID, t.Symbol, t.Side, t.Entry, t.Stop, t.Equity, t.RiskPct, t.Qty, t.EntryReason, t.Phase, timestamp(t.OpenedAt), t.Status, t.Exit, t.ExitReason, t.FollowedRules, t.ReviewNote, t.High, t.Low, t.Funding, closed}
 }
 func getTrade(q querier, id int64) (Trade, error) {
 	return scanTrade(q.QueryRow("SELECT "+tradeColumns+" FROM trades WHERE id=?", id))
 }
 
 func (s *Store) OpenTrade(in OpenInput) (Trade, error) {
-	t := Trade{Symbol: in.Symbol, Side: in.Side, Entry: in.Entry, Stop: in.Stop, Equity: in.Equity, RiskPct: in.RiskPct, Qty: in.Qty, EntryReason: in.EntryReason, OpenedAt: now(), Status: "open"}
+	t := Trade{Symbol: in.Symbol, Side: in.Side, Entry: in.Entry, Stop: in.Stop, Equity: in.Equity, RiskPct: in.RiskPct, Qty: in.Qty, EntryReason: in.EntryReason, Phase: &in.Phase, OpenedAt: now(), Status: "open"}
+	if !validPhase(in.Phase) {
+		return t, invalidError("请选择开仓时的趋势阶段")
+	}
 	if t.Qty == 0 {
 		t.Qty = stats.SuggestQty(t.Equity, t.RiskPct, t.Entry, t.Stop)
 	}
@@ -232,8 +253,8 @@ func (s *Store) OpenTrade(in OpenInput) (Trade, error) {
 
 func saveTrade(q querier, t Trade) error {
 	args := tradeArgs(t)
-	// 版本、开仓时间及状态只能由专用操作设置，补丁不能改变这些字段。
-	args = append(args[2:], t.ID)
+	// 版本、趋势阶段、开仓时间及状态只能由专用操作设置，补丁不能改变这些字段。
+	args = append(append(args[2:10:10], args[11:]...), t.ID)
 	_, err := q.Exec("UPDATE trades SET symbol=?,side=?,entry=?,stop=?,equity=?,risk_pct=?,qty=?,entry_reason=?,opened_at=?,status=?,exit=?,exit_reason=?,followed_rules=?,review_note=?,high=?,low=?,funding=?,closed_at=? WHERE id=?", args...)
 	return dbError(err)
 }
