@@ -268,7 +268,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .delete-confirm{border:1px solid var(--danger-line);padding:12px;border-radius:8px}
 @media (max-width:760px){
   .top-in{flex-wrap:wrap}
-  .nav{flex:1}
+  .nav{order:5;flex:0 0 100%}
   .history-row{grid-template-columns:1fr 1fr}
   .history-row>:last-child{grid-column:1/-1}
   .month-row{grid-template-columns:minmax(0,1fr) auto}
@@ -287,3 +287,20 @@ button:disabled{opacity:.5;cursor:not-allowed}
   .scrim{padding:8px}
   .kpi b{font-size:23px;overflow-wrap:anywhere}
 }
+
+/* 交易时段：颜色表示流动性分级，当前段另加描边，不只靠颜色区分。 */
+[data-tier=best]{--tier:var(--pos)}
+[data-tier=good]{--tier:var(--accent)}
+[data-tier=normal]{--tier:var(--idle)}
+[data-tier=light]{--tier:var(--warn)}
+[data-tier=avoid]{--tier:var(--neg)}
+[data-tier=closed]{--tier:var(--faint)}
+.session{padding:14px 16px;display:grid;gap:8px;min-width:0}
+.session-head{display:flex;align-items:center;justify-content:space-between;gap:6px 12px;flex-wrap:wrap}
+.session-now{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.session-now i{width:10px;height:10px;border-radius:50%;background:var(--tier);flex:none}
+.session-now b{font-size:18px;font-weight:600}
+.session-tier{font-size:14px;font-weight:600;color:var(--tier)}
+.session-bar{display:flex;gap:2px;height:26px;margin-top:2px;min-width:0}
+.session-seg{flex:1 1 0;min-width:0;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:4px;font-size:13px;color:var(--muted);white-space:nowrap;background:color-mix(in srgb,var(--tier) 20%,transparent)}
+.session-seg.on{color:var(--fg);font-weight:600;background:color-mix(in srgb,var(--tier) 38%,transparent);box-shadow:inset 0 0 0 2px var(--tier)}

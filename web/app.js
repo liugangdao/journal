@@ -247,6 +247,98 @@ function strategyRows(strategies) {
   }
   return rows;
 }
+// <market-session>
+// 各边界按所属市场的当地时间计算，夏令时和美英切换不同步的日子由时区规则自动处理。
+const SESSION_TIERS = { best: "最佳", good: "良好", normal: "一般", light: "偏淡", avoid: "回避", closed: "休市" };
+const SESSION_PHASES = [
+  { key: "settle", name: "结算", short: "", tier: "avoid" },
+  { key: "none", name: "无主要时段", short: "", tier: "light" },
+  { key: "asia", name: "亚盘", short: "亚盘", tier: "light" },
+  { key: "asia_europe", name: "亚欧重叠", short: "", tier: "good" },
+  { key: "europe", name: "欧盘", short: "欧盘", tier: "good" },
+  { key: "overlap", name: "欧美重叠", short: "重叠", tier: "best" },
+  { key: "us_late", name: "美盘后段", short: "美盘", tier: "normal" },
+];
+const SESSION_ZONES = { ny: "America/New_York", ldn: "Europe/London", tyo: "Asia/Tokyo" };
+const sessionFormats = {};
+function zoneParts(when, zone) {
+  sessionFormats[zone] ||= new Intl.DateTimeFormat("en-US", { timeZone: zone, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric" });
+  const parts = {};
+  for (const { type, value } of sessionFormats[zone].formatToParts(when)) if (type !== "literal") parts[type] = Number(value);
+  return parts;
+}
+// 把某时区的当地整点换算成 UTC；算两次，让偏移取目标时刻而不是估算时刻的值。
+function zoneTime(dayMs, offsetDays, hour, zone) {
+  const day = new Date(dayMs), wall = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate() + offsetDays, hour);
+  let t = wall;
+  for (let i = 0; i < 2; i++) {
+    const p = zoneParts(new Date(t), zone);
+    t = wall - (Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - t);
+  }
+  return new Date(t);
+}
+function sessionSegments(dayMs) {
+  const { ny, ldn, tyo } = SESSION_ZONES;
+  const bounds = [[0, 17, ny], [0, 18, ny], [1, 9, tyo], [1, 8, ldn], [1, 18, tyo], [1, 8, ny], [1, 17, ldn], [1, 17, ny]]
+    .map(([offset, hour, zone]) => zoneTime(dayMs, offset, hour, zone));
+  return SESSION_PHASES.map((phase, i) => ({ ...phase, start: bounds[i], end: bounds[i + 1] }));
+}
+// 交易日从纽约 17:00 开始；周五、周六开始的交易日休市。
+function marketSession(now) {
+  const p = zoneParts(now, SESSION_ZONES.ny);
+  const dayMs = Date.UTC(p.year, p.month - 1, p.day - (p.hour < 17 ? 1 : 0));
+  const weekday = new Date(dayMs).getUTCDay();
+  if (weekday === 5 || weekday === 6) {
+    const segments = sessionSegments(dayMs + (weekday === 5 ? 2 : 1) * 86400000);
+    return { key: "closed", name: "休市", tier: "closed", tierName: SESSION_TIERS.closed, end: segments[0].start, next: "开盘", segments };
+  }
+  const segments = sessionSegments(dayMs);
+  const index = segments.findIndex(s => now < s.end), current = segments[index];
+  const next = segments[index + 1]?.name ?? (weekday === 4 ? "休市" : "结算");
+  return { key: current.key, name: current.name, tier: current.tier, tierName: SESSION_TIERS[current.tier], end: current.end, next, segments };
+}
+// 分钟向上取整，避免临近切换时显示“0 分”。
+function sessionCountdown(ms, next) {
+  const total = Math.max(1, Math.ceil(ms / 60000)), hours = Math.floor(total / 60), minutes = total % 60;
+  const span = [hours ? `${hours} 小时` : "", minutes ? `${minutes} 分` : ""].filter(Boolean).join(" ");
+  return next === "开盘" ? `${span}后开盘` : `${span}后进入${next}`;
+}
+// </market-session>
+const beijingClock = new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+let sessionTimer = 0, sessionWake = null;
+function stopSessionClock() {
+  clearInterval(sessionTimer);
+  if (sessionWake) document.removeEventListener("visibilitychange", sessionWake);
+  sessionWake = null;
+}
+function sessionCard() {
+  stopSessionClock();
+  const card = el("div", "panel session");
+  card.setAttribute("aria-label", "当前交易时段");
+  const update = () => {
+    const now = new Date(), s = marketSession(now);
+    card.dataset.tier = s.tier;
+    // 时间条把结算放在末尾，从亚洲早盘读到纽约收盘。
+    const bar = el("div", "session-bar", [...s.segments.slice(1), s.segments[0]].map(seg => {
+      const node = el("div", `session-seg${seg.key === s.key ? " on" : ""}`, el("span", "", seg.short));
+      node.dataset.tier = seg.tier;
+      node.style.flexGrow = (seg.end - seg.start) / 3600000;
+      node.title = `${seg.name} · ${SESSION_TIERS[seg.tier]} · ${beijingClock.format(seg.start)}–${beijingClock.format(seg.end)}`;
+      return node;
+    }));
+    card.replaceChildren(
+      el("div", "session-head",
+        el("div", "session-now", el("i"), el("b", "", s.name), el("span", "session-tier", s.tier === "closed" ? null : s.tier === "avoid" ? s.tierName : `流动性${s.tierName}`)),
+        el("span", "sub num", `北京时间 ${beijingClock.format(now)}`)),
+      el("div", "sub", sessionCountdown(s.end - now, s.next)),
+      bar);
+  };
+  update();
+  sessionTimer = setInterval(update, 30000);
+  sessionWake = () => { if (!document.hidden) update(); };
+  document.addEventListener("visibilitychange", sessionWake);
+  return card;
+}
 function renderHome() {
   const o = overview, t = o.totals;
   const totals = el("div", "kpis",
@@ -279,6 +371,7 @@ function renderHome() {
     } catch (error) { showError(archivedList, error); }
   });
   $("view").replaceChildren(
+    sessionCard(),
     section("全部交易", totals, el("span", "sub", `${t.closed_n} 笔已平仓 · ${t.open_n} 笔持仓中 · 单笔风险 ${fmt(o.settings.risk_pct)}%`)),
     el("div", "note", "试过的策略和版本越多，越容易碰巧出现好看的结果。先积累样本，再判断优势。"),
     section("持仓中", open),
@@ -666,6 +759,7 @@ function renderSettings() {
   })));
 }
 function showLogin() {
+  stopSessionClock();
   $("nav").hidden = true;
   $("new-trade").hidden = true;
   const form = el("form", "panel");
@@ -691,6 +785,7 @@ function showLogin() {
 }
 async function route() {
   const sequence = ++routeSequence;
+  stopSessionClock();
   closeModal(true);
   notice("");
   if (!token) { showLogin(); return; }
