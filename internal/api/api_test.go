@@ -500,3 +500,37 @@ func TestPhaseSplitAndReadonly(t *testing.T) {
 		t.Fatal("交易缺少阶段")
 	}
 }
+
+func TestEquityAPI(t *testing.T) {
+	_, s := setup(t)
+	const path = "/api/equity/calibrations"
+	if o := call(t, s, "GET", "/api/overview", "", 200); o["equity"] != nil {
+		t.Fatal(o["equity"])
+	}
+	for _, body := range []string{`{"balance":0}`, `{"balance":-1}`, `{"balance":"abc"}`, `{"balance":1e999}`, `{"balance":100,"delta":5}`} {
+		wantStatus := 400
+		call(t, s, "POST", path, body, wantStatus)
+	}
+	first := call(t, s, "POST", path, `{"balance":10000}`, 201)
+	if first["reason"] != "initial" || first["delta"] != nil {
+		t.Fatal(first)
+	}
+	tr := newTrade(t, s, id(newStrategy(t, s)))
+	if o := call(t, s, "GET", "/api/overview", "", 200); number(o, "equity") != 10000 {
+		t.Fatal(o["equity"])
+	}
+	call(t, s, "POST", fmt.Sprintf("/api/trades/%d/close", id(tr)), `{"exit":110,"exit_reason":"target","followed_rules":true}`, 200)
+	if o := call(t, s, "GET", "/api/overview", "", 200); number(o, "equity") != 10200 {
+		t.Fatal(o["equity"])
+	}
+	call(t, s, "POST", path, `{"balance":10100,"reason":"nope"}`, 400)
+	second := call(t, s, "POST", path, `{"balance":10100,"reason":"fee"}`, 201)
+	if second["reason"] != "fee" || number(second, "delta") != -100 {
+		t.Fatal(second)
+	}
+	_, _, raw := request(t, s, "GET", path, "", "Bearer t0ken", 200)
+	var list []store.Calibration
+	if err := json.Unmarshal(raw, &list); err != nil || len(list) != 2 || list[0].Reason != "fee" {
+		t.Fatalf("%s %v", raw, err)
+	}
+}

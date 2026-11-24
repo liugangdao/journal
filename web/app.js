@@ -339,6 +339,56 @@ function sessionCard() {
   document.addEventListener("visibilitychange", sessionWake);
   return card;
 }
+const CALIBRATION_REASONS = [["cash_flow", "出入金"], ["missed_trade", "漏记交易"], ["fee", "手续费"], ["other", "其他"]];
+const calibrationReason = r => r === "initial" ? "初始设置" : (CALIBRATION_REASONS.find(([key]) => key === r) || [, r])[1];
+const money = n => Math.round(n * 100) / 100;
+function signedU(n) {
+  if (!Number.isFinite(n)) return "—";
+  const text = fmt(n);
+  return `${n > 0 && text !== "0" ? "+" : ""}${text} U`;
+}
+// 开仓默认权益：优先用推算值；从未设置时沿用最近一笔；推算值不为正时留空。
+function openingEquity() {
+  if (overview.equity == null) return overview.last_equity;
+  return overview.equity > 0 ? money(overview.equity) : "";
+}
+function equityCard() {
+  const e = overview.equity, isSet = e != null;
+  return el("div", "panel equity",
+    el("div", "", el("small", "", "账户权益"), el("b", `num ${isSet && e <= 0 ? "neg" : ""}`, isSet ? `${fmt(e)} U` : "未设置"),
+      el("span", "", isSet ? "平仓后自动增减" : "设置后，开仓自动带入")),
+    button(isSet ? "校准" : "设置账户权益", () => equityModal(), "btn btn-sm"));
+}
+function equityModal() {
+  const current = overview.equity, first = current == null;
+  const amount = field(first ? "当前账户余额（U）" : "实际余额（U）", !first && current > 0 ? money(current) : "", "decimal", true);
+  const reason = first ? null : selectField("原因", [["", "请选择"], ...CALIBRATION_REASONS], "", true);
+  const m = modal(first ? "设置账户权益" : "校准账户权益", "保存", async () => {
+    const balance = numberOf(amount.input, "余额");
+    if (balance <= 0) throw new Error("余额必须大于 0");
+    if (!first && !reason.input.value) throw new Error("请选择原因");
+    await api("POST", "/api/equity/calibrations", first ? { balance } : { balance, reason: reason.input.value });
+    await saved(first ? "账户权益已设置。" : "账户权益已校准。");
+  });
+  m.body.append(amount.node);
+  if (overview.totals.open_n > 0) m.body.append(el("div", "rulebox", "当前有持仓：请填不含浮动盈亏的钱包余额，持仓的盈亏会在平仓时计入。"));
+  if (first) return;
+  const diff = el("b", "num", "—");
+  const update = () => {
+    const n = parseNum(amount.input.value) - current;
+    diff.textContent = signedU(n);
+    diff.className = `num ${tone(Math.abs(n) < 0.005 ? 0 : n)}`;
+  };
+  amount.input.addEventListener("input", update);
+  update();
+  const log = el("div", "equity-log");
+  m.body.append(reason.node, el("div", "calc calc-two", el("div", "", el("small", "", "推算权益"), el("b", "num", `${fmt(current)} U`)), el("div", "", el("small", "", "差额"), diff)), log);
+  api("GET", "/api/equity/calibrations").then(list => {
+    log.replaceChildren(el("small", "", "最近校准"), ...list.slice(0, 5).map(c => el("div", "equity-log-row",
+      el("span", "sub", date(c.created_at)), el("span", "", calibrationReason(c.reason)),
+      num(c.delta == null ? "—" : signedU(c.delta), tone(c.delta)), num(`${fmt(c.balance)} U`))));
+  }).catch(error => { if (error.status !== 401) log.replaceChildren(el("div", "sub", "校准记录加载失败")); });
+}
 function renderHome() {
   const o = overview, t = o.totals;
   const totals = el("div", "kpis",
@@ -372,6 +422,7 @@ function renderHome() {
   });
   $("view").replaceChildren(
     sessionCard(),
+    equityCard(),
     section("全部交易", totals, el("span", "sub", `${t.closed_n} 笔已平仓 · ${t.open_n} 笔持仓中 · 单笔风险 ${fmt(o.settings.risk_pct)}%`)),
     el("div", "note", "试过的策略和版本越多，越容易碰巧出现好看的结果。先积累样本，再判断优势。"),
     section("持仓中", open),
@@ -560,9 +611,10 @@ function tradeModal(mode, trade = {}, readonly = false) {
     f.side = selectField("方向", [["long", "做多"], ["short", "做空"]], trade.side || "long");
     grid.append(f.side.node, addField("symbol", "品种", trade.symbol, "text"),
       addField("entry", "入场价", trade.entry), addField("stop", "止损价", trade.stop),
-      addField("equity", "账户权益（U）", opening ? overview.last_equity : trade.equity),
+      addField("equity", "账户权益（U）", opening ? openingEquity() : trade.equity),
       addField("risk_pct", "单笔风险（%）", opening ? overview.settings.risk_pct : trade.risk_pct));
     m.body.append(grid);
+    if (opening && overview.equity != null && overview.equity <= 0) m.body.append(el("div", "err", "推算权益已不大于 0，请先校准，或在这里手动填写。"));
   } else {
     m.body.append(el("div", "rulebox num", `${trade.side === "long" ? "做多" : "做空"} · ${phaseName(trade.phase)} · 入场 ${fmt(trade.entry, 8)} · 止损 ${fmt(trade.stop, 8)} · 数量 ${fmt(trade.qty, 8)} · 1R ${fmt(trade.qty * Math.abs(trade.entry - trade.stop))} U`));
   }

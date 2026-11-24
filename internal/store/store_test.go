@@ -409,7 +409,7 @@ func TestImportValidationAtomic(t *testing.T) {
 	openTrade(t, s, a.ID)
 	before := dump(t, s)
 	for _, change := range []func(*Dump){
-		func(d *Dump) { d.SchemaVersion = 3 }, func(d *Dump) { d.Settings.MinSample = 1 }, func(d *Dump) { d.Strategies = append(d.Strategies, d.Strategies[0]) },
+		func(d *Dump) { d.SchemaVersion = 4 }, func(d *Dump) { d.Settings.MinSample = 1 }, func(d *Dump) { d.Strategies = append(d.Strategies, d.Strategies[0]) },
 		func(d *Dump) { d.Versions = append(d.Versions, d.Versions[0]) }, func(d *Dump) { d.Trades = append(d.Trades, d.Trades[0]) }, func(d *Dump) { d.Trades[0].Stop = 100 },
 		func(d *Dump) { d.Trades[0].Qty = 0 }, func(d *Dump) { d.Trades[0].Status = "closed" }, func(d *Dump) { d.Trades[0].Status = "unknown" }, func(d *Dump) { d.Trades[0].OpenedAt = time.Time{} },
 		func(d *Dump) { d.Trades[0].Exit = ptr(110.0) }, func(d *Dump) { d.Strategies[0].ID = 0 }, func(d *Dump) { d.Versions = nil },
@@ -633,11 +633,11 @@ func TestMigrateV1Database(t *testing.T) {
 	}
 	defer s.Close()
 	var version int
-	if err := s.db.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil || version != 2 {
+	if err := s.db.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil || version != 3 {
 		t.Fatalf("版本 %d %v", version, err)
 	}
 	d := dump(t, s)
-	if len(d.Trades) != 1 || d.Trades[0].Phase != nil || d.SchemaVersion != 2 {
+	if len(d.Trades) != 1 || d.Trades[0].Phase != nil || d.SchemaVersion != 3 {
 		t.Fatalf("%+v", d)
 	}
 	// 迁移后再次打开不重复迁移。

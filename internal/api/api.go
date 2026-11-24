@@ -38,6 +38,8 @@ func New(s *store.Store, token string, web fs.FS) http.Handler {
 	mux.HandleFunc("POST /api/trades/{id}/close", a.closeTrade)
 	mux.HandleFunc("PATCH /api/trades/{id}", a.updateTrade)
 	mux.HandleFunc("DELETE /api/trades/{id}", a.deleteTrade)
+	mux.HandleFunc("GET /api/equity/calibrations", a.calibrations)
+	mux.HandleFunc("POST /api/equity/calibrations", a.calibrate)
 	mux.HandleFunc("GET /api/settings", a.getSettings)
 	mux.HandleFunc("PUT /api/settings", a.putSettings)
 	mux.HandleFunc("GET /api/export", a.export)

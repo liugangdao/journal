@@ -63,6 +63,7 @@ type totalsView struct {
 }
 type overviewView struct {
 	Settings   store.Settings  `json:"settings"`
+	Equity     *float64        `json:"equity"`
 	LastEquity *float64        `json:"last_equity"`
 	Totals     totalsView      `json:"totals"`
 	OpenTrades []openTradeView `json:"open_trades"`
@@ -167,6 +168,9 @@ func (s snapshot) overview() overviewView {
 	if len(s.dump.Trades) > 0 {
 		e := s.dump.Trades[0].Equity
 		o.LastEquity = &e
+	}
+	if e, ok := store.ComputeEquity(s.dump.Calibrations, s.dump.Trades); ok {
+		o.Equity = &e
 	}
 	for _, t := range s.dump.Trades {
 		if t.Status == "open" {

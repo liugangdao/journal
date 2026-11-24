@@ -25,12 +25,17 @@ type ClosedTrade struct {
 
 func RiskPerUnit(t ClosedTrade) float64 { return math.Abs(t.Entry - t.Stop) }
 
-func RMultiple(t ClosedTrade) float64 {
+// PnL 是扣除资金费后的盈亏金额。
+func PnL(t ClosedTrade) float64 {
 	d := 1.0
 	if t.Side == Short {
 		d = -1
 	}
-	return (d*(t.Exit-t.Entry)*t.Qty - t.Funding) / (t.Qty * RiskPerUnit(t))
+	return d*(t.Exit-t.Entry)*t.Qty - t.Funding
+}
+
+func RMultiple(t ClosedTrade) float64 {
+	return PnL(t) / (t.Qty * RiskPerUnit(t))
 }
 
 func Excursions(t ClosedTrade) (mfe, mae float64, ok bool) {

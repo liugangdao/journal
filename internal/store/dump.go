@@ -12,11 +12,13 @@ type Dump struct {
 	Strategies    []Strategy `json:"strategies"`
 	Versions      []Version  `json:"versions"`
 	Trades        []Trade    `json:"trades"`
+	// 版本 1、2 的备份没有此字段，导入后账户权益回到未设置。
+	Calibrations []Calibration `json:"equity_calibrations"`
 }
 
 // Export 在同一事务内读取，避免导出期间写入造成跨表不一致。
 func (s *Store) Export() (Dump, error) {
-	d := Dump{SchemaVersion: 2}
+	d := Dump{SchemaVersion: 3}
 	err := s.transaction(func(tx *sql.Tx) error {
 		var err error
 		d.Settings, err = getSettings(tx)
@@ -32,6 +34,10 @@ func (s *Store) Export() (Dump, error) {
 			return err
 		}
 		d.Trades, err = listTrades(tx, TradeFilter{})
+		if err != nil {
+			return err
+		}
+		d.Calibrations, err = listCalibrations(tx)
 		return err
 	})
 	return d, err
@@ -39,7 +45,7 @@ func (s *Store) Export() (Dump, error) {
 
 func validateDump(d *Dump) error {
 	// 版本 1 的备份没有趋势阶段，导入后视为未记录。
-	if d.SchemaVersion != 1 && d.SchemaVersion != 2 {
+	if d.SchemaVersion < 1 || d.SchemaVersion > 3 {
 		return invalidError("不支持此备份版本")
 	}
 	if err := validateSettings(d.Settings); err != nil {
@@ -90,7 +96,7 @@ func validateDump(d *Dump) error {
 		}
 		trades[t.ID] = true
 	}
-	return nil
+	return validateCalibrations(d.Calibrations)
 }
 
 func (s *Store) Import(d Dump) error {
@@ -98,11 +104,12 @@ func (s *Store) Import(d Dump) error {
 	d.Strategies = append([]Strategy(nil), d.Strategies...)
 	d.Versions = append([]Version(nil), d.Versions...)
 	d.Trades = append([]Trade(nil), d.Trades...)
+	d.Calibrations = append([]Calibration(nil), d.Calibrations...)
 	if err := validateDump(&d); err != nil {
 		return err
 	}
 	return s.transaction(func(tx *sql.Tx) error {
-		for _, table := range []string{"trades", "strategy_versions", "strategies"} {
+		for _, table := range []string{"equity_calibrations", "trades", "strategy_versions", "strategies"} {
 			if _, err := tx.Exec("DELETE FROM " + table); err != nil {
 				return err
 			}
@@ -122,6 +129,11 @@ func (s *Store) Import(d Dump) error {
 		}
 		for _, t := range d.Trades {
 			if _, err := tx.Exec("INSERT INTO trades("+tradeColumns+") VALUES("+tradeValues+")", tradeArgs(t)...); err != nil {
+				return err
+			}
+		}
+		for _, c := range d.Calibrations {
+			if _, err := tx.Exec("INSERT INTO equity_calibrations(id,balance,delta,reason,created_at) VALUES(?,?,?,?,?)", c.ID, c.Balance, c.Delta, c.Reason, timestamp(c.CreatedAt)); err != nil {
 				return err
 			}
 		}

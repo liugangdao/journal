@@ -213,6 +213,28 @@ func (a *api) deleteTrade(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (a *api) calibrations(w http.ResponseWriter, r *http.Request) {
+	v, err := a.store.ListCalibrations()
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (a *api) calibrate(w http.ResponseWriter, r *http.Request) {
+	var in store.CalibrationInput
+	if !readJSON(w, r, &in) {
+		return
+	}
+	v, err := a.store.Calibrate(in)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, v)
+}
+
 func (a *api) getSettings(w http.ResponseWriter, r *http.Request) {
 	v, err := a.store.GetSettings()
 	if err != nil {

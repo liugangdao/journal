@@ -116,7 +116,20 @@ func Open(path string) (*Store, error) {
 			}
 			version = 2
 		}
-		if version != 2 {
+		// 版本 2 → 3：新增账户权益校准点，旧数据保持未设置。
+		if version == 2 {
+			if _, err := tx.Exec(`CREATE TABLE equity_calibrations (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, balance REAL NOT NULL, delta REAL,
+ reason TEXT NOT NULL, created_at TEXT NOT NULL
+)`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec("UPDATE schema_version SET version=3"); err != nil {
+				return err
+			}
+			version = 3
+		}
+		if version != 3 {
 			return invalidError("不支持此数据库版本")
 		}
 		return nil

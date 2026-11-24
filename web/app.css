@@ -86,6 +86,21 @@ main{max-width:1200px;margin:0 auto;padding-block:20px 60px;padding-left:max(16p
 .kpi small{display:block;color:var(--muted);font-size:14px}
 .kpi b{display:block;font-size:26px;font-weight:600;margin-top:4px}
 .kpi span{font-size:14px;color:var(--faint)}
+.equity{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px}
+.equity small{display:block;color:var(--muted);font-size:14px}
+.equity b{display:block;font-size:26px;font-weight:600;margin-top:4px;overflow-wrap:anywhere}
+.equity span{font-size:14px;color:var(--faint)}
+.equity .btn{flex:none}
+.equity-log{display:grid;gap:6px}
+.equity-log small{color:var(--muted);font-size:14px}
+.equity-log-row{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,.8fr) minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:baseline;font-size:14px}
+.equity-log-row .num{text-align:right}
+.calc.calc-two{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (max-width:520px){
+  .equity-log-row{grid-template-columns:minmax(0,1fr) auto auto;gap:2px 12px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  .equity-log-row:last-child{border-bottom:0;padding-bottom:0}
+  .equity-log-row>.sub{grid-column:1/-1}
+}
 .note{font-size:14px;color:var(--muted);display:flex;gap:8px;align-items:flex-start;padding:10px 14px;border-radius:8px;background:var(--panel);border:1px dashed var(--line-2)}
 
 /* 列表 */
