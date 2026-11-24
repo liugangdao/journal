@@ -74,6 +74,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 .theme button{border:0;background:transparent;padding:5px 10px;font-size:14px;color:var(--muted);white-space:nowrap}
 .theme button[aria-pressed="true"]{background:var(--panel-2);color:var(--fg);font-weight:600}
 
+#view.refreshing{opacity:.6;cursor:progress;transition:opacity .15s}
 main{max-width:1200px;margin:0 auto;padding-block:20px 60px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:22px}
 .view{display:grid;gap:22px}
 .sec-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 10px}

@@ -151,10 +151,14 @@ function bindSubmit(form, target, action) {
     form.dataset.busy = "true";
     const controls = [...form.querySelectorAll("button,input,select,textarea")].map(node => [node, node.disabled]);
     controls.forEach(([node]) => { node.disabled = true; });
+    // 网络慢时让用户知道请求已发出。
+    const submit = form.querySelector('button[type="submit"]'), label = submit?.textContent;
+    if (submit) submit.textContent = "保存中…";
     try { await action(); } catch (error) { showError(target, error); }
     finally {
       form.dataset.busy = "false";
       controls.forEach(([node, disabled]) => { node.disabled = disabled; });
+      if (submit) submit.textContent = label;
     }
   });
 }
@@ -534,10 +538,11 @@ function renderDetail(strategy, detail, current) {
     section("按趋势阶段", phases, el("span", "sub", `按开仓时的判断拆分 · 不足 ${overview.settings.min_sample} 笔的阶段变淡，仅供参考`)), section("版本历史", history), section(`v${v.no} 交易`, trades, el("span", "sub", readonly ? "点击查看 · 历史版本只读" : "点击修改或删除")));
 }
 
-async function saved(message) {
+// 服务器确认保存后立即关闭弹窗，数据在后台刷新，不再多等一个来回。
+function saved(message) {
   closeModal(true);
-  await route();
-  if (token) notice(message);
+  notice(message);
+  void route({ quiet: true });
 }
 function tradeModal(mode, trade = {}, readonly = false) {
   const opening = mode === "open", closing = mode === "close";
@@ -812,6 +817,8 @@ function renderSettings() {
 }
 function showLogin() {
   stopSessionClock();
+  $("view").inert = false;
+  $("view").classList.remove("refreshing");
   $("nav").hidden = true;
   $("new-trade").hidden = true;
   const form = el("form", "panel");
@@ -835,13 +842,19 @@ function showLogin() {
   $("view").replaceChildren(el("div", "login", form));
   password.input.focus();
 }
-async function route() {
+// quiet 刷新保留当前页面和提示，刷新期间页面变淡且不可操作，避免基于旧数据开仓或校准。
+// hashchange 和按钮会传入事件对象，只有显式传 { quiet: true } 才算后台刷新。
+async function route(options) {
+  const quiet = options?.quiet === true;
   const sequence = ++routeSequence;
+  const view = $("view");
+  const settle = () => { if (sequence === routeSequence) { view.inert = false; view.classList.remove("refreshing"); } };
+  view.inert = quiet;
+  view.classList.toggle("refreshing", quiet);
   stopSessionClock();
-  closeModal(true);
-  notice("");
-  if (!token) { showLogin(); return; }
-  $("view").replaceChildren(empty("正在加载…"));
+  if (!quiet) { closeModal(true); notice(""); }
+  if (!token) { settle(); showLogin(); return; }
+  if (!quiet) view.replaceChildren(empty("正在加载…"));
   $("new-trade").disabled = true;
   try {
     const o = await api("GET", "/api/overview");
@@ -871,9 +884,12 @@ async function route() {
     $("new-trade").disabled = !o.strategies.length;
     $("new-trade").title = o.strategies.length ? "记录开仓" : "请先新建未归档的策略";
     document.querySelectorAll(".nav a").forEach(a => a.classList.toggle("on", a.hash === hash || (a.hash === "#monthly" && hash.startsWith("#monthly"))));
-    window.scrollTo(0, 0);
+    if (!quiet) window.scrollTo(0, 0);
+    settle();
   } catch (error) {
-    if (sequence !== routeSequence || error.status === 401) return;
+    if (sequence !== routeSequence) return;
+    settle();
+    if (error.status === 401) return;
     $("view").replaceChildren(el("div", "panel empty", el("p", "err", error.message), el("div", "actions", button("重试", route), link("返回面板", "#home"), button("重新登录", () => { token = ""; remember("journal-token", ""); showLogin(); }))));
   }
 }
