@@ -55,6 +55,24 @@ const empty = text => el("div", "empty sub", text);
 // 开仓时判断的趋势阶段；旧交易没有记录，显示"未记录"。
 const PHASES = [["early", "前期", "趋势刚启动"], ["mid", "中期", "趋势延续中"], ["late", "后期", "趋势末端"], ["unsure", "不确定", "看不清阶段"]];
 const phaseName = p => (PHASES.find(([key]) => key === p) || [, "未记录"])[1];
+const SETUPS = [["breakout", "突破前高", "趋势明确、回调小"], ["pullback", "回调高二·低二", "回调到主要高低点"]];
+const setupName = k => (SETUPS.find(([key]) => key === k) || [, "—"])[1];
+const EXIT_PLANS = [["trail", "移动止损", ""], ["measured_move", "measured move", "测量目标"], ["scale_out", "分仓", ""]];
+const exitPlanName = k => (EXIT_PLANS.find(([key]) => key === k) || [, "—"])[1];
+const keyLevelLabel = side => side === "short" ? "主要高点" : "主要低点";
+// 违规项的中文名：方向不一致单独命名，其余取版本定义中的清单项和偏差。
+function violationName(def, key) {
+  if (key === "vegas_dir") return "与 1H Vegas 方向相反";
+  return (def.items.find(i => i.key === key) || def.deviations.find(d => d.key === key) || { label: key }).label;
+}
+function violationTag(trade, def) {
+  if (!trade.violations?.length) return trade.status === "closed" ? el("span", "tag t-pos", "按规则") : null;
+  const tag = el("span", "tag t-neg", trade.status === "closed" ? "违规" : "违规开仓");
+  tag.title = trade.violations.map(k => violationName(def, k)).join("；");
+  tag.tabIndex = 0;
+  tag.setAttribute("aria-label", `${tag.textContent}：${tag.title}`);
+  return tag;
+}
 function notice(text, bad = false) {
   $("notice").textContent = text;
   $("notice").className = bad ? "note neg" : "note";
@@ -124,19 +142,26 @@ function selectField(label, options, value, full = false) {
   f.input.replaceWith(select);
   return { node: f.node, input: select };
 }
-function phasePicker() {
+// 单选分段控件；options 为 [值, 名称, 说明]。value() 返回选中的值，未选时为空字符串。
+function segPicker(legend, options, value = "") {
   const box = el("fieldset", "f full phase-pick");
-  const group = `phase-${++fieldSequence}`;
-  box.append(el("legend", "", "趋势阶段（必选，开仓后不可修改）"));
+  const group = `seg-${++fieldSequence}`;
+  box.append(el("legend", "", legend));
   const seg = el("div", "phase-seg");
-  for (const [key, name, hint] of PHASES) {
+  seg.style.setProperty("--cols", options.length);
+  for (const [key, name, hint] of options) {
     const input = el("input");
-    input.type = "radio"; input.name = group; input.value = key;
-    seg.append(el("label", "", input, el("b", "", name), el("small", "", hint)));
+    input.type = "radio"; input.name = group; input.value = key; input.checked = key === value;
+    seg.append(el("label", "", input, el("b", "", name), hint ? el("small", "", hint) : null));
   }
   box.append(seg);
-  return { node: box, value: () => box.querySelector("input:checked")?.value || "" };
+  return {
+    node: box,
+    value: () => box.querySelector("input:checked")?.value || "",
+    set: v => box.querySelectorAll("input").forEach(i => { i.checked = i.value === v; })
+  };
 }
+const phasePicker = () => segPicker("趋势阶段（必选，开仓后不可修改）", PHASES);
 function checkbox(label, checked) {
   const input = el("input");
   input.type = "checkbox";
@@ -237,19 +262,6 @@ function interval(summary) {
   }
   return el("div", "interval", bar, el("div", "ci-lbl", el("span", "", "−1R"), el("span", "", "0"), el("span", "", "+1R")),
     el("div", "sub num", ...(summary.ci_ok ? ["95% 区间 ", rnum(summary.ci_low), " ～ ", rnum(summary.ci_high)] : ["暂无置信区间"])));
-}
-function strategyRows(strategies) {
-  const rows = el("div", "panel rows");
-  rows.append(el("div", "row head strat-row", ...["策略 / 当前版本", "笔数", "期望 E", "95% 区间", "结论", ""].map(v => el("div", "", v))));
-  if (!strategies.length) rows.append(empty("暂无策略，先写下入场、止损与出场规则。"));
-  for (const s of strategies) {
-    const summary = s.stats.summary;
-    const name = el("div", "c-n", el("div", "sname", s.name, el("em", "", `v${s.current_version.no}`)), el("div", "sub", `${summary.n} 笔已平仓`));
-    const conclusion = el("div", "c-t", verdict(s.stats), flag(s.stats));
-    rows.append(link("", `#strategy-${s.id}`, "row link strat-row"));
-    rows.lastChild.append(name, el("div", "c-k num", summary.n), el("div", "c-e", rnum(summary.n ? summary.expectancy : null)), el("div", "c-c", interval(summary)), conclusion, el("div", "c-f faint", "›"));
-  }
-  return rows;
 }
 // <market-session>
 // 各边界按所属市场的当地时间计算，夏令时和美英切换不同步的日子由时区规则自动处理。
@@ -375,7 +387,7 @@ function equityModal() {
     await saved(first ? "账户权益已设置。" : "账户权益已校准。");
   });
   m.body.append(amount.node);
-  if (overview.totals.open_n > 0) m.body.append(el("div", "rulebox", "当前有持仓：请填不含浮动盈亏的钱包余额，持仓的盈亏会在平仓时计入。"));
+  if (overview.open_trades.length > 0) m.body.append(el("div", "rulebox", "当前有持仓：请填不含浮动盈亏的钱包余额，持仓的盈亏会在平仓时计入。"));
   if (first) return;
   const diff = el("b", "num", "—");
   const update = () => {
@@ -393,44 +405,56 @@ function equityModal() {
       num(c.delta == null ? "—" : signedU(c.delta), tone(c.delta)), num(`${fmt(c.balance)} U`))));
   }).catch(error => { if (error.status !== 401) log.replaceChildren(el("div", "sub", "校准记录加载失败")); });
 }
+function edgeBlock(report, version, href) {
+  const e = report.edge, s = e.summary;
+  const head = el("div", "edge-head", el("div", "", el("div", "sname", overview.strategy.name, el("em", "", `v${version.no}`)), el("div", "sub", "只统计按规则执行的单子")), el("div", "c-t", verdict(e), flag(e)));
+  const body = el("div", "kpis kpis-3",
+    kpi("按规则单", `${s.n} 笔`, s.n ? `胜率 ${pct(s.win_rate)}` : "还没有样本"),
+    kpi("每笔期望 E", rfmt(s.n ? s.expectancy : null), "按规则单", tone(s.n ? s.expectancy : 0)),
+    kpi("累计", rfmt(s.total_r), `最大回撤 ${ddfmt(s.max_drawdown_r)}`, tone(s.total_r)));
+  const panel = el("div", "panel edge", head, body, interval(s));
+  if (href) panel.append(el("div", "actions", link("查看详情 ›", href, "btn btn-sm")));
+  return panel;
+}
+function executionBlock(report) {
+  const x = report.execution, all = report.all, edge = report.edge.summary;
+  const loss = all.n && edge.n ? all.expectancy - edge.expectancy : null;
+  const kpis = el("div", "kpis",
+    kpi("按规则执行率", pct(x.followed_rate), `${x.followed_n} / ${x.closed_n} 笔`),
+    kpi("最近违规", x.recent_n ? `${x.recent_violated} 笔` : "—", x.recent_n ? `最近 ${x.recent_n} 笔已平仓中` : "还没有已平仓", x.recent_violated ? "neg" : ""),
+    kpi("违规单累计", rfmt(x.violated_n ? x.violated_r : null), `${x.violated_n} 笔`, tone(x.violated_n ? x.violated_r : 0)),
+    kpi("执行损耗", rfmt(loss), "全部单 E − 按规则单 E", tone(loss)));
+  const rows = el("div", "panel rows");
+  rows.append(el("div", "row head cmp-row", ...["", "笔数", "期望 E", "累计"].map(v => el("div", "", v))));
+  for (const [name, sum] of [["全部单（实际结果）", all], ["按规则单（策略本身）", edge]]) {
+    rows.append(el("div", "row cmp-row", el("div", "sname", name), num(sum.n), rnum(sum.n ? sum.expectancy : null), rnum(sum.n ? sum.total_r : null)));
+  }
+  return el("div", "exec", kpis, rows);
+}
 function renderHome() {
-  const o = overview, t = o.totals;
-  const totals = el("div", "kpis",
-    kpi("总计", rfmt(t.total_r), "含已归档与旧版本", tone(t.total_r)),
-    kpi("按规则执行率", pct(t.followed_rate), `${t.closed_n - t.violated_n} / ${t.closed_n} 笔`),
-    kpi("违规单累计", rfmt(t.violated_r), `${t.violated_n} 笔`, tone(t.violated_r)),
-    kpi("已试过", `${t.strategies_n} 策略`, `${t.versions_n} 个版本`));
+  const o = overview;
   const open = el("div", "panel rows");
-  open.append(el("div", "row head pos-row", ...["品种 / 策略", "方向", "入场", "止损", "1R", ""].map(v => el("div", "", v))));
-  if (!o.open_trades.length) open.append(empty("暂无持仓。记下开仓理由，再开始跟踪。"));
+  open.append(el("div", "row head pos-row", ...["品种", "方向", "入场", "止损", "1R", ""].map(v => el("div", "", v))));
+  if (!o.open_trades.length) open.append(empty("暂无持仓。"));
   for (const trade of o.open_trades) {
     open.append(el("div", "row pos-row",
-      el("div", "", el("div", "sname num", trade.symbol), el("div", "sub", `${trade.strategy_name} · v${trade.version_no} · ${phaseName(trade.phase)}`), el("div", "sub", date(trade.opened_at))),
+      el("div", "", el("div", "sname num", trade.symbol, " ", violationTag(trade, o.definition)), el("div", "sub", `v${trade.version_no} · ${setupName(trade.setup)} · ${phaseName(trade.phase)}`), el("div", "sub", date(trade.opened_at))),
       el("div", "hide-m", el("span", `side ${trade.side}`, trade.side === "long" ? "多" : "空")),
       el("div", "num hide-m", fmt(trade.entry, 8)), el("div", "num hide-m", fmt(trade.stop, 8)),
       el("div", "num hide-m", `${fmt(trade.risk_amount)} U`),
-      button("平仓", () => tradeModal("close", trade), "btn btn-sm")));
+      button("平仓", async () => tradeModal("close", trade, false, await definitionOf(trade)), "btn btn-sm")));
   }
-  const archived = el("details", "archived");
-  const archivedList = el("div");
-  archived.append(el("summary", "sub", `已归档 ${o.archived_n} 个`), archivedList);
-  let loaded = false;
-  archived.addEventListener("toggle", async () => {
-    if (!archived.open || loaded) return;
-    archivedList.replaceChildren(empty("正在加载…"));
-    try {
-      const all = await api("GET", "/api/strategies?archived=1");
-      archivedList.replaceChildren(strategyRows(all.filter(s => s.archived)));
-      loaded = true;
-    } catch (error) { showError(archivedList, error); }
-  });
   $("view").replaceChildren(
     sessionCard(),
     equityCard(),
-    section("全部交易", totals, el("span", "sub", `${t.closed_n} 笔已平仓 · ${t.open_n} 笔持仓中 · 单笔风险 ${fmt(o.settings.risk_pct)}%`)),
-    el("div", "note", "试过的策略和版本越多，越容易碰巧出现好看的结果。先积累样本，再判断优势。"),
-    section("持仓中", open),
-    section("策略 · 当前版本", strategyRows(o.strategies), button("＋ 新建策略", () => strategyModal(), "btn btn-sm")), archived);
+    section("策略优势", edgeBlock(o.report, o.version, "#strategy"), el("span", "sub", `单笔风险 ${fmt(o.settings.risk_pct)}%`)),
+    section("执行情况", executionBlock(o.report), el("span", "sub", "包含违规单")),
+    section("持仓中", open));
+}
+// 交易所属版本的清单定义；当前版本直接用首页数据，旧版本向后端取。
+async function definitionOf(trade) {
+  if (trade.version_id === overview.version.id) return overview.definition;
+  return (await api("GET", `/api/versions/${trade.version_id}/stats`)).definition;
 }
 
 function svgNode(tag, attributes = {}, text) {
@@ -471,71 +495,90 @@ function killText(version) {
   return [version.kill_recent_n == null ? "最近 N 笔：未启用" : `最近 ${version.kill_recent_n} 笔平均 R < ${fmt(version.kill_recent_below)}`,
     version.kill_max_dd_r == null ? "最大回撤：未启用" : `最大回撤 > ${fmt(version.kill_max_dd_r)}R`];
 }
-function renderDetail(strategy, detail, current) {
-  const v = detail.version, stats = detail.stats, s = stats.summary;
-  const readonly = v.id !== current.id;
-  const actions = el("div", "actions");
-  if (!readonly) {
-    actions.append(button("编辑规则 / 名称", () => strategyModal(strategy, current)), button(strategy.archived ? "取消归档" : "归档策略", async event => {
-      const b = event.currentTarget;
-      b.disabled = true;
-      try { await api("PATCH", `/api/strategies/${strategy.id}`, { archived: !strategy.archived }); await route(); }
-      catch (error) { if (error.status !== 401) notice(error.message, true); }
-      finally { b.disabled = false; }
-    }));
+function groupRows(title, groups, nameOf) {
+  // 拆分后样本更小，不足最少笔数的分组整行变淡，只作参考。
+  const rows = el("div", "panel rows");
+  rows.append(el("div", "row head phase-row", ...[title, "笔数", "胜率", "期望 E", "累计", "平均浮盈 / 浮亏"].map(v => el("div", "", v))));
+  for (const p of groups) {
+    const thin = p.n < overview.settings.min_sample;
+    rows.append(el("div", `row phase-row${thin ? " thin" : ""}`,
+      el("div", "", el("div", "sname", nameOf(p.key)), el("div", "sub show-m", `${p.n} 笔 · 胜率 ${p.n ? pct(p.win_rate) : "—"}`)),
+      el("div", "num hide-m", p.n), el("div", "num hide-m", p.n ? pct(p.win_rate) : "—"),
+      rnum(p.n ? p.expectancy : null), el("div", "hide-m", rnum(p.n ? p.total_r : null)),
+      el("div", "num sub hide-m", ...(p.quality_n ? [rnum(p.avg_mfe), " / ", rnum(-p.avg_mae), ` · ${p.quality_n} 笔`] : ["—"]))));
   }
+  return rows;
+}
+function checklistPanel(def) {
+  const panel = el("div", "panel rules", el("h2", "section-title", "开仓清单"));
+  let sectionName = "";
+  for (const it of def.items) {
+    if (it.section !== sectionName) { sectionName = it.section; panel.append(el("div", "ck-sec", sectionName)); }
+    panel.append(el("div", "ck-line", it.kind === "attention" ? el("span", "tag t-warn", "注意") : el("span", "tag t-idle", "规则"), " ", it.setup ? `［${setupName(it.setup)}］` : "", it.label));
+  }
+  panel.append(el("div", "ck-sec", "平仓偏差（发生即违规）"), ...def.deviations.map(d => el("div", "ck-line", d.label)));
+  return panel;
+}
+function renderDetail(strategy, detail) {
+  const v = detail.version, def = detail.definition, report = detail.report, stats = report.edge, s = stats.summary;
+  const current = strategy.versions[strategy.versions.length - 1].version;
+  const readonly = v.id !== current.id;
   const versions = el("div", "vpick");
-  [...strategy.versions].reverse().forEach(version => {
-    const b = button(`v${version.no}${version.id === current.id ? " · 当前" : " · 只读"}`, () => { location.hash = `strategy-${strategy.id}-v${version.no}`; }, version.id === v.id ? "on" : "");
+  [...strategy.versions].reverse().forEach(({ version }) => {
+    const b = button(`v${version.no}${version.id === current.id ? " · 当前" : " · 只读"}`, () => { location.hash = version.id === current.id ? "strategy" : `strategy-v${version.no}`; }, version.id === v.id ? "on" : "");
     b.setAttribute("aria-pressed", String(version.id === v.id));
     versions.append(b);
   });
   const cards = el("div", "panel stats");
   // 带符号的 R 值：正数绿色、负数红色、零不着色。
   const signed = n => [rfmt(n), tone(n)];
-  [["已平仓", `${s.n} 笔`], ["每笔期望 E", ...signed(s.n ? s.expectancy : null)], ["胜率", s.n ? pct(s.win_rate) : "—"], ["累计", ...signed(s.total_r)],
+  [["按规则单", `${s.n} 笔`], ["每笔期望 E", ...signed(s.n ? s.expectancy : null)], ["胜率", s.n ? pct(s.win_rate) : "—"], ["累计", ...signed(s.total_r)],
     ["平均盈利", ...signed(s.n && s.win_rate > 0 ? s.avg_win : null)], ["平均亏损", ...signed(s.n && s.win_rate < 1 ? s.avg_loss : null)], ["最大回撤", ddfmt(s.max_drawdown_r)], ["最长连亏", `${s.max_loss_streak} 笔`],
     ["R 标准差", fmt(s.std_dev)], ["95% 区间下限", ...signed(s.ci_ok ? s.ci_low : null)], ["95% 区间上限", ...signed(s.ci_ok ? s.ci_high : null)], ["版本", `v${v.no}`]]
     .forEach(([label, value, cls]) => cards.append(el("div", "stat", el("small", "", label), el("b", `num ${cls || ""}`, value))));
-  const rules = el("div", "panel rules", el("h2", "section-title", "规则与停用条件"), el("pre", "", v.rules || "未填写规则"), ...killText(v).map(text => el("div", "sub", text)), el("div", "sub", `创建于 ${date(v.created_at)}`));
+  const rules = el("div", "panel rules", el("h2", "section-title", "规则与停用条件"), el("pre", "", v.rules), ...killText(v).map(text => el("div", "sub", text)), el("div", "sub", `创建于 ${date(v.created_at)}`));
   const checks = el("div", "checks",
     checkCard("多空分开", [[`做多 ${stats.sides.long_n} 笔`, rnum(stats.sides.long_n ? stats.sides.long_e : null)], [`做空 ${stats.sides.short_n} 笔`, rnum(stats.sides.short_n ? stats.sides.short_e : null)]], stats.sides.warn ? "收益可能来自单边行情" : "两边各至少 10 笔时检查单边收益。", stats.sides.warn),
     checkCard("去掉最好的 5 笔", [["原期望", rnum(s.n ? s.expectancy : null)], [`剩余 ${Math.max(0, s.n - 5)} 笔`, rnum(stats.top_removed.computed ? stats.top_removed.e : null)]], !stats.top_removed.computed ? "超过 5 笔后计算。" : stats.top_removed.warn ? "收益集中在少数几笔" : "未触发收益集中警示。", stats.top_removed.warn),
-    checkCard("按规则 / 违规", [[`按规则 ${stats.rules.followed_n} 笔 · E`, rnum(stats.rules.followed_n ? stats.rules.followed_e : null)], ["按规则累计", rnum(stats.rules.followed_r)], [`违规 ${stats.rules.violated_n} 笔 · E`, rnum(stats.rules.violated_n ? stats.rules.violated_e : null)], ["违规累计", rnum(stats.rules.violated_r)]]),
     checkCard("入场 / 出场质量", [["平均最大浮盈", rnum(stats.quality.n ? stats.quality.avg_mfe : null)], ["平均最大浮亏", rnum(stats.quality.n ? -stats.quality.avg_mae : null)], ["平均利润回吐", rnum(stats.quality.n ? -stats.quality.avg_giveback : null)]], `${stats.quality.n} / ${s.n} 笔填写了最高、最低价。`),
     checkCard("停用条件", [["最近均值", rnum(stats.kill.recent_evaluated ? stats.kill.recent_mean : null)], ["最近 N 笔", v.kill_recent_n == null ? "未启用" : !stats.kill.recent_evaluated ? `不足 ${v.kill_recent_n} 笔，未判定` : stats.kill.recent_triggered ? "已触发" : "未触发"], ["最大回撤", ddfmt(s.max_drawdown_r)], ["回撤条件", v.kill_max_dd_r == null ? "未启用" : !stats.kill.dd_evaluated ? "未判定" : stats.kill.dd_triggered ? "已触发" : "未触发"]], killText(v).join("；"), stats.kill.triggered));
-  // 拆分后样本更小，不足最少笔数的阶段整行变淡，只作参考。
-  const phases = el("div", "panel rows");
-  phases.append(el("div", "row head phase-row", ...["阶段", "笔数", "胜率", "期望 E", "累计", "平均浮盈 / 浮亏"].map(v => el("div", "", v))));
-  for (const p of detail.phases) {
-    const thin = p.n < overview.settings.min_sample;
-    phases.append(el("div", `row phase-row${thin ? " thin" : ""}`,
-      el("div", "", el("div", "sname", phaseName(p.phase)), el("div", "sub show-m", `${p.n} 笔 · 胜率 ${p.n ? pct(p.win_rate) : "—"}`)),
-      el("div", "num hide-m", p.n), el("div", "num hide-m", p.n ? pct(p.win_rate) : "—"),
-      rnum(p.n ? p.expectancy : null), el("div", "hide-m", rnum(p.n ? p.total_r : null)),
-      el("div", "num sub hide-m", ...(p.quality_n ? [rnum(p.avg_mfe), " / ", rnum(-p.avg_mae), ` · ${p.quality_n} 笔`] : ["—"]))));
+  const attention = el("div", "panel rows");
+  attention.append(el("div", "row head cmp-row", ...["注意项", "勾了", "没勾", ""].map(t => el("div", "", t))));
+  for (const a of report.attention) {
+    const cell = g => el("div", "num", `${g.n} 笔 · `, rnum(g.n ? g.expectancy : null));
+    attention.append(el("div", `row cmp-row${a.checked.n < overview.settings.min_sample || a.unchecked.n < overview.settings.min_sample ? " thin" : ""}`, el("div", "sub", violationName(def, a.key)), cell(a.checked), cell(a.unchecked), el("div")));
   }
+  const violations = el("div", "panel rows");
+  violations.append(el("div", "row head viol-row", ...["违规项", "次数", "累计"].map(t => el("div", "", t))));
+  if (!report.violations.length) violations.append(empty("还没有违规记录。"));
+  for (const x of report.violations) violations.append(el("div", "row viol-row", el("div", "", violationName(def, x.key)), num(`${x.n} 次`), rnum(x.total_r)));
   const history = el("div", "panel rows");
-  [...strategy.versions].reverse().forEach(version => {
-    const row = link("", `#strategy-${strategy.id}-v${version.no}`, "row link history-row");
-    row.append(el("b", "num", `v${version.no}`), el("div", "sub", date(version.created_at)), num(`${version.stats.summary.n} 笔`), rnum(version.stats.summary.n ? version.stats.summary.expectancy : null), el("div", "sub preserve", version.rules || "未填写规则"));
+  [...strategy.versions].reverse().forEach(({ version, edge_summary: e, execution }) => {
+    const row = link("", version.id === current.id ? "#strategy" : `#strategy-v${version.no}`, "row link history-row");
+    row.append(el("b", "num", `v${version.no}`), el("div", "sub", date(version.created_at)), num(`${e.n} / ${execution.closed_n} 笔`), rnum(e.n ? e.expectancy : null), el("div", "sub preserve", version.rules));
     history.append(row);
   });
   const trades = el("div", "panel rows");
   if (!detail.trades.length) trades.append(empty("这个版本还没有交易。"));
   for (const trade of detail.trades) {
-    const row = button("", () => tradeModal("edit", trade, readonly), "row link trade-row trade-button");
-    row.append(el("div", "", el("div", "sname num", trade.symbol), el("div", "sub", date(trade.opened_at), " · ", el("span", "nowrap", phaseName(trade.phase)))),
+    const row = button("", () => tradeModal("edit", trade, readonly, def), "row link trade-row trade-button");
+    row.append(el("div", "", el("div", "sname num", trade.symbol), el("div", "sub", date(trade.opened_at), " · ", el("span", "nowrap", `${setupName(trade.setup)} · ${phaseName(trade.phase)}`))),
       el("div", "hide-m", el("span", `side ${trade.side}`, trade.side === "long" ? "多" : "空")),
       el("div", "num hide-m", fmt(trade.entry, 8)), el("div", "num hide-m", fmt(trade.exit, 8)),
       el("div", "", trade.status === "open" ? el("span", "tag t-idle", "持仓中") : rnum(trade.r)),
       el("div", "sub hide-m", { stop: "止损", target: "止盈", manual: "主动离场" }[trade.exit_reason] || "—"),
-      el("div", "sub hide-m", trade.followed_rules == null ? "—" : trade.followed_rules ? "按规则" : "违规"), el("span", "faint hide-m", "›"));
+      el("div", "hide-m", violationTag(trade, def) || "—"), el("span", "faint hide-m", "›"));
     trades.append(row);
   }
-  $("view").replaceChildren(link("‹ 策略面板", "#home", "back"), el("div", "d-head", el("div", "", el("h1", "", strategy.name, num(`v${v.no}`), verdict(stats)), el("div", "sub", `${readonly ? "历史版本只读 · 单独统计" : "当前版本"}${strategy.archived ? " · 已归档" : ""}`)), actions), versions,
-    cards, el("div", "grid2", curve(s.curve), rules), section("附加检验", checks),
-    section("按趋势阶段", phases, el("span", "sub", `按开仓时的判断拆分 · 不足 ${overview.settings.min_sample} 笔的阶段变淡，仅供参考`)), section("版本历史", history), section(`v${v.no} 交易`, trades, el("span", "sub", readonly ? "点击查看 · 历史版本只读" : "点击修改或删除")));
+  const thinNote = el("span", "sub", `按规则单 · 不足 ${overview.settings.min_sample} 笔的分组变淡，仅供参考`);
+  $("view").replaceChildren(link("‹ 首页", "#home", "back"), el("div", "d-head", el("div", "", el("h1", "", strategy.strategy.name, num(`v${v.no}`), verdict(stats)), el("div", "sub", readonly ? "历史版本只读 · 单独统计" : "当前版本 · 优势只统计按规则执行的单子"))), versions,
+    cards, el("div", "grid2", curve(s.curve), rules), checklistPanel(def), section("执行情况", executionBlock(report), el("span", "sub", "包含违规单")),
+    section("按违规项", violations, el("span", "sub", "全部已平仓 · 按代价排序")),
+    section("按 Setup", groupRows("Setup", report.setups, setupName), thinNote),
+    section("按趋势阶段", groupRows("阶段", report.phases, phaseName), thinNote.cloneNode(true)),
+    section("注意项对照", attention, el("span", "sub", "按规则单 · 每格为笔数与期望 E")),
+    section("附加检验", checks, el("span", "sub", "按规则单")), section("版本历史", history, el("span", "sub", "按规则单 / 全部已平仓")),
+    section(`v${v.no} 交易`, trades, el("span", "sub", readonly ? "点击查看 · 历史版本只读" : "点击修改或删除")));
 }
 
 // 服务器确认保存后立即关闭弹窗，数据在后台刷新，不再多等一个来回。
@@ -544,12 +587,68 @@ function saved(message) {
   notice(message);
   void route({ quiet: true });
 }
-function tradeModal(mode, trade = {}, readonly = false) {
+// 开仓清单：Vegas 方向、Setup 与对应条目、出场计划。返回取值和未满足规则项的函数。
+function checklistForm(def, side) {
+  const node = el("div", "ck");
+  const vegas = segPicker("1H Vegas 方向", [["long", "多", "向上"], ["short", "空", "向下"]], side());
+  let vegasTouched = false;
+  vegas.node.addEventListener("change", () => { vegasTouched = true; });
+  const setup = segPicker("Setup（必选）", SETUPS);
+  const boxes = {};
+  const groups = [];
+  let current = null;
+  for (const it of def.items) {
+    if (!current || current.name !== it.section) { current = { name: it.section, node: el("div", "ck-group", el("div", "ck-sec", it.section)), items: [] }; groups.push(current); }
+    const box = checkbox("", false);
+    box.node.className = `chk ck-item${it.kind === "attention" ? " ck-attn" : ""}`;
+    if (it.kind === "attention") box.node.append(el("span", "tag t-warn", "注意"));
+    box.node.append(el("span", "", it.label));
+    boxes[it.key] = { ...box, item: it };
+    current.node.append(box.node);
+    current.items.push(it);
+  }
+  const hint = el("div", "sub", "选择 Setup 后显示对应条目。");
+  node.append(vegas.node, setup.node, hint, ...groups.map(g => g.node));
+  const plan = segPicker("出场计划（必选）", EXIT_PLANS);
+  node.append(plan.node);
+  const applies = it => !it.setup || it.setup === setup.value();
+  function refresh() {
+    if (!vegasTouched) vegas.set(side());
+    hint.hidden = Boolean(setup.value());
+    for (const g of groups) {
+      let shown = 0;
+      for (const it of g.items) { const on = applies(it); boxes[it.key].node.hidden = !on; shown += on; }
+      g.node.hidden = !shown;
+    }
+  }
+  return {
+    node, plan, refresh,
+    setup: () => setup.value(),
+    // 只提交当前 Setup 适用的条目，切换 Setup 后残留的勾选不会被发送。
+    value: () => ({ vegas_dir: vegas.value(), checks: Object.fromEntries(Object.values(boxes).filter(b => applies(b.item)).map(b => [b.item.key, b.input.checked])) }),
+    unmet: () => [...(vegas.value() && vegas.value() !== side() ? ["与 1H Vegas 方向相反"] : []), ...Object.values(boxes).filter(b => b.item.kind === "rule" && applies(b.item) && !b.input.checked).map(b => b.item.label)]
+  };
+}
+// 开仓时记录的清单，只读展示。
+function checklistSummary(trade, def) {
+  const box = el("div", "rulebox ck-summary");
+  box.append(el("div", "", `${setupName(trade.setup)} · ${phaseName(trade.phase)} · ${keyLevelLabel(trade.side)} `, num(fmt(trade.key_level, 8)), ` · 出场 ${exitPlanName(trade.exit_plan)}`, trade.target != null ? el("span", "", " · 目标 ", num(fmt(trade.target, 8))) : null),
+    el("div", "", `1H Vegas：${trade.checklist.vegas_dir === "long" ? "多" : "空"}`));
+  for (const it of def.items) {
+    if (!(it.key in trade.checklist.checks)) continue;
+    const ok = trade.checklist.checks[it.key];
+    box.append(el("div", it.kind === "rule" && !ok ? "neg" : "", ok ? "✓ " : "✗ ", it.label, it.kind === "attention" ? "（注意项）" : ""));
+  }
+  box.append(el("div", "sub", "开仓时记录，不可修改"));
+  return box;
+}
+function tradeModal(mode, trade = {}, readonly = false, def = overview.definition) {
   const opening = mode === "open", closing = mode === "close";
   const hasClose = closing || trade.status === "closed";
   let deleting = false;
   const f = {};
-  const m = modal(readonly ? `查看交易 · ${trade.symbol} · 只读` : opening ? "记一笔 · 开仓" : `${closing ? "平仓" : "编辑交易"} · ${trade.symbol}`, closing ? "确认平仓" : opening ? "记下这笔" : "保存修改", readonly ? null : async () => {
+  const openTitle = opening ? "记一笔 · 开仓" : `${closing ? "平仓" : "编辑交易"} · ${trade.symbol}`;
+  const m = modal(readonly ? `查看交易 · ${trade.symbol} · 只读` : openTitle, closing ? "确认平仓" : opening ? "保存" : "保存修改", readonly ? null : async () => {
     if (deleting) {
       deleting = false;
       await api("DELETE", `/api/trades/${trade.id}`);
@@ -561,21 +660,29 @@ function tradeModal(mode, trade = {}, readonly = false) {
       body.symbol = f.symbol.input.value.trim();
       body.side = f.side.input.value;
       body.entry_reason = f.entry_reason.input.value.trim();
-      if (!body.symbol || !body.entry_reason) throw new Error("品种和入场理由不能为空");
+      if (!body.symbol) throw new Error("品种不能为空");
       for (const key of ["entry", "stop", "equity", "risk_pct"]) body[key] = numberOf(f[key].input, f[key].label);
       body.qty = opening && !f.qty.input.value.trim() ? suggested() : numberOf(f.qty.input, "实际数量");
       if (![body.entry, body.stop, body.equity, body.risk_pct, body.qty].every(n => Number.isFinite(n) && n > 0)) throw new Error("价格、权益、风险比例和数量必须大于 0");
       if (body.side === "long" ? body.stop >= body.entry : body.stop <= body.entry) throw new Error("止损必须在入场价的亏损一侧");
       if (opening) {
-        body.strategy_id = numberOf(f.strategy.input, "策略");
+        body.key_level = numberOf(f.key_level.input, keyLevelLabel(body.side));
+        if (!(body.key_level > 0)) throw new Error(`${keyLevelLabel(body.side)}必须大于 0`);
         body.phase = f.phase.value();
         if (!body.phase) throw new Error("请选择开仓时的趋势阶段");
+        body.setup = f.checklist.setup();
+        if (!body.setup) throw new Error("请选择 Setup");
+        body.exit_plan = f.checklist.plan.value();
+        if (!body.exit_plan) throw new Error("请选择出场计划");
+        if (!f.checklist.value().vegas_dir) throw new Error("请选择 1H Vegas 方向");
+        body.checklist = f.checklist.value();
+        if (body.exit_plan === "measured_move") body.target = numberOf(f.target.input, "目标价", true);
       }
     }
     if (hasClose) {
       body.exit = numberOf(f.exit.input, "出场价");
       body.exit_reason = f.exit_reason.input.value;
-      body.followed_rules = f.followed_rules.input.checked;
+      body.deviations = deviations().filter(k => f.dev[k].input.checked);
       body.review_note = f.review_note.input.value;
       if (!closing) body.clear = [];
       for (const key of ["high", "low", "funding"]) {
@@ -592,54 +699,64 @@ function tradeModal(mode, trade = {}, readonly = false) {
     await api(opening || closing ? "POST" : "PATCH", opening ? "/api/trades" : `/api/trades/${trade.id}${closing ? "/close" : ""}`, body);
     await saved(opening ? "开仓已记录。" : closing ? "已平仓，统计已更新。" : "交易已更新。");
   });
+  const deviations = () => def.deviations.map(d => d.key);
   const addField = (key, label, value, kind = "decimal", full = false) => {
     f[key] = { ...field(label, value, kind, full), label };
     return f[key].node;
   };
   const grid = el("div", "fgrid");
   if (opening) {
-    const strategies = overview.strategies;
-    f.strategy = selectField("策略", strategies.map(s => [s.id, `${s.name} · v${s.current_version.no}`]), strategies[0]?.id, true);
-    const rule = el("div", "rulebox preserve");
-    const updateRule = () => {
-      const strategy = strategies.find(s => s.id === parseNum(f.strategy.input.value));
-      rule.textContent = strategy ? `v${strategy.current_version.no}：${strategy.current_version.rules || "未填写规则"}` : "请先新建策略。";
-    };
-    f.strategy.input.addEventListener("change", updateRule);
-    updateRule();
-    m.body.append(f.strategy.node, rule);
+    m.body.append(el("details", "rulebox", el("summary", "", `${overview.strategy.name} · v${overview.version.no}（点开查看规则原文）`), el("pre", "", overview.version.rules)));
   } else {
     m.body.append(el("div", "sub num", `开仓 ${date(trade.opened_at)}${trade.closed_at ? ` · 平仓 ${date(trade.closed_at)}` : ""}`));
-    if (!closing) m.body.append(el("div", "rulebox", `趋势阶段：${phaseName(trade.phase)}（开仓时记录，不可修改）`));
+    if (!closing) m.body.append(checklistSummary(trade, def));
   }
   if (!closing) {
     f.side = selectField("方向", [["long", "做多"], ["short", "做空"]], trade.side || "long");
     grid.append(f.side.node, addField("symbol", "品种", trade.symbol, "text"),
-      addField("entry", "入场价", trade.entry), addField("stop", "止损价", trade.stop),
-      addField("equity", "账户权益（U）", opening ? openingEquity() : trade.equity),
+      addField("entry", "入场价", trade.entry), addField("stop", "止损价", trade.stop));
+    if (opening) grid.append(addField("key_level", keyLevelLabel("long"), "", "decimal", true));
+    grid.append(addField("equity", "账户权益（U）", opening ? openingEquity() : trade.equity),
       addField("risk_pct", "单笔风险（%）", opening ? overview.settings.risk_pct : trade.risk_pct));
     m.body.append(grid);
     if (opening && overview.equity != null && overview.equity <= 0) m.body.append(el("div", "err", "推算权益已不大于 0，请先校准，或在这里手动填写。"));
   } else {
-    m.body.append(el("div", "rulebox num", `${trade.side === "long" ? "做多" : "做空"} · ${phaseName(trade.phase)} · 入场 ${fmt(trade.entry, 8)} · 止损 ${fmt(trade.stop, 8)} · 数量 ${fmt(trade.qty, 8)} · 1R ${fmt(trade.qty * Math.abs(trade.entry - trade.stop))} U`));
+    m.body.append(el("div", "rulebox num", `${trade.side === "long" ? "做多" : "做空"} · ${setupName(trade.setup)} · ${phaseName(trade.phase)} · 入场 ${fmt(trade.entry, 8)} · 止损 ${fmt(trade.stop, 8)} · 数量 ${fmt(trade.qty, 8)} · 1R ${fmt(trade.qty * Math.abs(trade.entry - trade.stop))} U`));
+    if (trade.violations?.length) m.body.append(el("div", "warnbox", "开仓违规：", trade.violations.map(k => violationName(def, k)).join("；")));
   }
   const calc = el("div", "calc");
   const riskValue = el("b", "num", "—"), qtyValue = el("b", "num", "—"), nominalValue = el("b", "num", "—");
   const stopError = el("div", "err");
   stopError.hidden = true;
+  const unmet = el("div", "warnbox");
+  unmet.hidden = true;
   if (!closing) {
     calc.append(...[["1R（实际数量）", riskValue], ["建议数量", qtyValue], ["名义价值", nominalValue]].map(([label, value]) => el("div", "", el("small", "", label), value)));
     m.body.append(calc, stopError, addField("qty", opening ? "实际数量（留空使用建议值）" : "实际数量", trade.qty));
-    if (opening) { f.phase = phasePicker(); m.body.append(f.phase.node); }
-    m.body.append(addField("entry_reason", "入场理由（必填，下单前写）", trade.entry_reason, "textarea"));
+    if (opening) {
+      f.phase = phasePicker();
+      f.checklist = checklistForm(def, () => f.side.input.value);
+      const target = addField("target", "目标价（选填）", "");
+      f.targetNode = target;
+      m.body.append(f.phase.node, f.checklist.node, target);
+    }
+    m.body.append(addField("entry_reason", "备注（选填）", trade.entry_reason, "textarea"));
+    if (opening) m.body.append(unmet);
   }
   const preview = el("div", "bigR num", "—");
+  const verdictPreview = el("div", "sub");
   if (hasClose) {
     const closeGrid = el("div", "fgrid", addField("exit", "出场价", trade.exit), el("div", "f", el("label", "", "这笔的 R"), preview));
     f.exit_reason = selectField("出场原因", [["stop", "止损"], ["target", "止盈"], ["manual", "主动离场"]], trade.exit_reason || "manual", true);
-    f.followed_rules = checkbox("这笔按规则执行", trade.followed_rules ?? true);
     closeGrid.append(f.exit_reason.node);
-    m.body.append(closeGrid, f.followed_rules.node, addField("review_note", "复盘（选填）", trade.review_note, "textarea"));
+    f.dev = {};
+    const devBox = el("fieldset", "f full ck", el("legend", "", "执行偏差（实际发生的才勾，勾上即记为违规）"));
+    for (const d of def.deviations) {
+      f.dev[d.key] = checkbox(d.label, (trade.deviations || []).includes(d.key));
+      f.dev[d.key].node.classList.add("ck-item");
+      devBox.append(f.dev[d.key].node);
+    }
+    m.body.append(closeGrid, devBox, verdictPreview, addField("review_note", "复盘（选填）", trade.review_note, "textarea"));
     const more = el("details", "more", el("summary", "", "更多（选填）：持仓期间最高 / 最低价、资金费"),
       el("div", "fgrid", addField("high", "最高价", trade.high), addField("low", "最低价", trade.low), addField("funding", "资金费（U，付出为正、收到为负）", trade.funding, "decimal", true)));
     if (readonly) more.open = true;
@@ -658,12 +775,22 @@ function tradeModal(mode, trade = {}, readonly = false) {
       const wrongSide = entry > 0 && stop > 0 && (side === "long" ? stop >= entry : stop <= entry);
       stopError.hidden = !wrongSide;
       stopError.textContent = "止损必须在入场价的亏损一侧。";
-      m.submit.disabled = wrongSide || (opening && !overview.strategies.length);
+      m.submit.disabled = wrongSide;
       const valid = !wrongSide && entry > 0 && stop > 0 && suggestion > 0 && Number.isFinite(suggestion);
       riskValue.textContent = valid && qty > 0 ? `${fmt(qty * Math.abs(entry - stop))} U` : "—";
       qtyValue.textContent = valid ? fmt(suggestion, 8) : "—";
       nominalValue.textContent = valid && qty > 0 ? `${fmt(qty * entry)} U` : "—";
-      if (opening) f.qty.input.placeholder = valid ? fmt(suggestion, 8) : "自动计算";
+      if (opening) {
+        f.qty.input.placeholder = valid ? fmt(suggestion, 8) : "自动计算";
+        f.key_level.node.querySelector("label").textContent = `${keyLevelLabel(side)}（必填，供复盘分析）`;
+        f.checklist.refresh();
+        f.targetNode.hidden = f.checklist.plan.value() !== "measured_move";
+        // 违规也能保存，按钮文字提醒这笔会记为违规开仓。
+        const missing = f.checklist.setup() ? f.checklist.unmet() : [];
+        unmet.hidden = !missing.length;
+        unmet.textContent = `未满足 ${missing.length} 项：${missing.join("；")}`;
+        if (m.form.dataset.busy !== "true") m.submit.textContent = missing.length ? "记为违规开仓" : "保存";
+      }
     }
     if (hasClose) {
       const exit = parseNum(f.exit.input.value), funding = f.funding.input.value.trim() ? parseNum(f.funding.input.value) : 0;
@@ -671,6 +798,11 @@ function tradeModal(mode, trade = {}, readonly = false) {
       const r = valid ? ((side === "long" ? 1 : -1) * (exit - entry) * qty - funding) / (qty * Math.abs(entry - stop)) : NaN;
       preview.textContent = rfmt(r);
       preview.className = `bigR num ${tone(r)}`;
+      // 开仓违规只看开仓清单；改单时后端会按新的方向重新判断。
+      const openViolations = (trade.violations || []).filter(k => !deviations().includes(k));
+      const devs = deviations().filter(k => f.dev[k].input.checked);
+      verdictPreview.textContent = openViolations.length || devs.length ? "这笔将记为：违规" : "这笔将记为：按规则执行";
+      verdictPreview.className = openViolations.length || devs.length ? "sub neg" : "sub pos";
     }
   }
   m.form.addEventListener("input", calculate);
@@ -687,40 +819,6 @@ function tradeModal(mode, trade = {}, readonly = false) {
       button("确认删除", () => { deleting = true; m.form.requestSubmit(); }, "btn btn-danger")));
     m.body.append(deleteButton, confirmation);
   }
-}
-
-function strategyModal(strategy, current) {
-  const editing = Boolean(strategy);
-  const name = field("名称", strategy?.name);
-  const rules = field("规则（入场条件、止损、出场）", current?.rules, "textarea");
-  const recentN = field("停用：最近 N 笔", current?.kill_recent_n, "decimal");
-  const below = field("平均 R 低于", current?.kill_recent_below, "decimal");
-  const dd = field("停用：最大回撤超过（R，留空不启用）", current?.kill_max_dd_r, "decimal", true);
-  const m = modal(editing ? "编辑策略" : "新建策略", "保存", async () => {
-    const newName = name.input.value.trim();
-    if (!newName) throw new Error("策略名称不能为空");
-    const data = { rules: rules.input.value.trim(), kill_recent_n: numberOf(recentN.input, "最近笔数", true), kill_recent_below: numberOf(below.input, "均值阈值", true), kill_max_dd_r: numberOf(dd.input, "回撤阈值", true) };
-    if ((data.kill_recent_n == null) !== (data.kill_recent_below == null)) throw new Error("最近笔数和均值阈值必须一起填写");
-    if (data.kill_recent_n != null && (!Number.isSafeInteger(data.kill_recent_n) || data.kill_recent_n <= 0)) throw new Error("最近笔数必须是正整数");
-    if (data.kill_max_dd_r != null && data.kill_max_dd_r <= 0) throw new Error("回撤阈值必须大于 0");
-    if (!editing) {
-      const created = await api("POST", "/api/strategies", { name: newName, ...data });
-      closeModal(true);
-      location.hash = `strategy-${created.id}`;
-      return;
-    }
-    // 两个接口分别提交；名称成功后更新本地基线，重试不会重复创建版本。
-    if (newName !== strategy.name) {
-      await api("PATCH", `/api/strategies/${strategy.id}`, { name: newName });
-      strategy.name = newName;
-    }
-    if (Object.keys(data).some(key => data[key] !== (key === "rules" ? (current.rules || "").trim() : current[key]))) {
-      const created = await api("POST", `/api/strategies/${strategy.id}/versions`, data);
-      closeModal(true);
-      location.hash = `strategy-${strategy.id}-v${created.no}`;
-    } else await saved("策略名称已保存，版本保持不变。");
-  });
-  m.body.append(el("div", "rulebox", editing ? `修改规则或停用条件后保存，将创建 v${current.no + 1}，新版本从零开始统计；v${current.no} 保留并单独统计。只改名称不会生成新版本。` : "先写清规则；以后修改规则会创建新版本，分别统计。"), name.node, rules.node, el("div", "fgrid", recentN.node, below.node, dd.node));
 }
 
 // 月份按浏览器本地时区划分，起止时刻交给后端筛选平仓时间。
@@ -744,18 +842,9 @@ function renderMonthly(m, start, current) {
     ["平均盈利", rfmt(has && m.win_rate > 0 ? m.avg_win : null), has && m.win_rate > 0 && tone(m.avg_win)], ["平均亏损", rfmt(has && m.win_rate < 1 ? m.avg_loss : null), has && m.win_rate < 1 && tone(m.avg_loss)], ["最大回撤", has ? ddfmt(m.max_drawdown_r) : "—"], ["最长连亏", has ? `${m.max_loss_streak} 笔` : "—"],
     ["按规则执行率", has ? pct(m.followed_rate) : "—"], ["按规则累计", rfmt(followedN ? m.total_r - m.violated_r : null), followedN && tone(m.total_r - m.violated_r)], ["违规单", has ? `${m.violated_n} 笔` : "—"], ["违规单累计", rfmt(m.violated_n ? m.violated_r : null), m.violated_n && tone(m.violated_r)]]
     .forEach(([label, value, cls]) => cards.append(el("div", "stat", el("small", "", label), el("b", `num ${cls || ""}`, value))));
-  const rows = el("div", "panel rows");
-  rows.append(el("div", "row head month-row", ...["策略", "累计", "期望 E"].map(v => el("div", "", v))));
-  if (!has) rows.append(empty("本月无已平仓交易。"));
-  for (const s of m.strategies) {
-    const row = link("", `#strategy-${s.id}`, "row link month-row");
-    row.append(el("div", "", el("div", "sname", s.name, s.archived ? el("em", "", "已归档") : null), el("div", "sub", `${s.n} 笔 · 胜率 ${pct(s.win_rate)}`)), rnum(s.total_r), el("div", "hide-m", rnum(s.expectancy)));
-    rows.append(row);
-  }
   $("view").replaceChildren(
     el("div", "d-head", el("div", "", el("h1", "", `${start.getFullYear()} 年 ${start.getMonth() + 1} 月`), el("div", "sub", `按平仓时间归月 · ${isCurrent ? "本月至今" : "整月"}`)), actions),
-    cards, el("div", "note", "一个月的样本太小，这里只看执行与结果，不判断策略有无优势。"),
-    section("按策略", rows, el("span", "sub", "各版本合并 · 含已归档")));
+    cards, el("div", "note", has ? "一个月的样本太小，这里只看执行与结果，不判断策略有无优势。各版本合并统计。" : "本月无已平仓交易。"));
 }
 function renderSettings() {
   const form = el("form", "panel settings-panel");
@@ -801,16 +890,17 @@ function renderSettings() {
       let dump;
       try { dump = JSON.parse(await chosen.text()); } catch (_) { throw new Error("文件不是有效的 JSON 备份"); }
       if (!dump || typeof dump !== "object" || !Array.isArray(dump.strategies) || !Array.isArray(dump.versions) || !Array.isArray(dump.trades)) throw new Error("备份必须包含策略、版本和交易数组");
+      if (dump.schema_version !== 4) throw new Error("只接受版本 4 的备份（本版不兼容旧数据）");
       if (!token || !file.isConnected) return;
       const m = modal("导入并替换全部数据", "确认替换全部数据", async () => {
         await api("POST", "/api/import", dump);
         await saved("备份已导入，全部数据已替换。");
       });
       m.submit.className = "btn btn-danger";
-      m.body.append(el("p", "", `已选择：${chosen.name}`), el("div", "rulebox", `包含 ${dump.strategies.length} 个策略、${dump.versions.length} 个版本、${dump.trades.length} 笔交易。`), el("p", "neg", "此操作将整体替换所有策略、版本、交易和设置，无法撤销。请确认已导出现有数据的备份。"));
+      m.body.append(el("p", "", `已选择：${chosen.name}`), el("div", "rulebox", `包含 ${dump.versions.length} 个策略版本、${dump.trades.length} 笔交易。`), el("p", "neg", "此操作将整体替换全部交易、账户权益和设置，无法撤销。请确认已导出现有数据的备份。"));
     } catch (err) { showError(backupError, err); }
   });
-  const backup = el("div", "panel settings-panel", el("h2", "section-title", "备份"), el("p", "sub", "导出全部策略、版本、交易和设置为 JSON。导入为整库替换，需再次确认。"), el("div", "actions", exportButton, button("导入并替换…", () => file.click(), "btn btn-danger")), file, backupError);
+  const backup = el("div", "panel settings-panel", el("h2", "section-title", "备份"), el("p", "sub", "导出全部交易、策略版本、账户权益和设置为 JSON。导入为整库替换，需再次确认；只接受本版导出的备份。"), el("div", "actions", exportButton, button("导入并替换…", () => file.click(), "btn btn-danger")), file, backupError);
   $("view").replaceChildren(form, backup, el("div", "", button("退出登录", () => {
     token = ""; overview = null; remember("journal-token", ""); routeSequence++; showLogin(); notice("已退出登录。");
   })));
@@ -861,16 +951,15 @@ async function route(options) {
     if (sequence !== routeSequence) return;
     overview = o;
     const hash = location.hash || "#home";
-    const match = /^#strategy-(\d+)(?:-v(\d+))?$/.exec(hash);
+    const match = /^#strategy(?:-v(\d+))?$/.exec(hash);
     if (match) {
-      const strategy = await api("GET", `/api/strategies/${match[1]}`);
+      const strategy = await api("GET", "/api/strategy");
       if (sequence !== routeSequence) return;
-      const current = strategy.versions.reduce((a, b) => a.no > b.no ? a : b);
-      const version = match[2] ? strategy.versions.find(v => v.no === parseNum(match[2])) : current;
-      if (!version) throw new Error("该策略版本不存在");
-      const detail = await api("GET", `/api/versions/${version.id}/stats`);
+      const picked = match[1] ? strategy.versions.find(v => v.version.no === parseNum(match[1])) : strategy.versions[strategy.versions.length - 1];
+      if (!picked) throw new Error("该策略版本不存在");
+      const detail = await api("GET", `/api/versions/${picked.version.id}/stats`);
       if (sequence !== routeSequence) return;
-      renderDetail(strategy, detail, current);
+      renderDetail(strategy, detail);
     } else if (hash.startsWith("#monthly")) {
       const { start, current } = monthOf(hash);
       const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
@@ -881,8 +970,8 @@ async function route(options) {
     else renderHome();
     $("nav").hidden = false;
     $("new-trade").hidden = false;
-    $("new-trade").disabled = !o.strategies.length;
-    $("new-trade").title = o.strategies.length ? "记录开仓" : "请先新建未归档的策略";
+    $("new-trade").disabled = false;
+    $("new-trade").title = "记录开仓";
     document.querySelectorAll(".nav a").forEach(a => a.classList.toggle("on", a.hash === hash || (a.hash === "#monthly" && hash.startsWith("#monthly"))));
     if (!quiet) window.scrollTo(0, 0);
     settle();
@@ -890,7 +979,7 @@ async function route(options) {
     if (sequence !== routeSequence) return;
     settle();
     if (error.status === 401) return;
-    $("view").replaceChildren(el("div", "panel empty", el("p", "err", error.message), el("div", "actions", button("重试", route), link("返回面板", "#home"), button("重新登录", () => { token = ""; remember("journal-token", ""); showLogin(); }))));
+    $("view").replaceChildren(el("div", "panel empty", el("p", "err", error.message), el("div", "actions", button("重试", route), link("返回首页", "#home"), button("重新登录", () => { token = ""; remember("journal-token", ""); showLogin(); }))));
   }
 }
 function setTheme(theme) {

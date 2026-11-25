@@ -255,7 +255,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .phase-row .show-m{display:none}
 .phase-pick{border:0;margin:0;padding:0;min-width:0}
 .phase-pick legend{font-size:14px;color:var(--muted);padding:0;margin-bottom:5px}
-.phase-seg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--line-2);border-radius:8px;overflow:hidden}
+.phase-seg{display:grid;grid-template-columns:repeat(var(--cols,4),minmax(0,1fr));border:1px solid var(--line-2);border-radius:8px;overflow:hidden}
 .phase-seg label{display:grid;gap:1px;text-align:center;padding:8px 6px;cursor:pointer;border-left:1px solid var(--line-2);color:var(--muted)}
 .phase-seg label:first-child{border-left:0}
 .phase-seg input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
@@ -320,3 +320,35 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .session-bar{display:flex;gap:2px;height:26px;margin-top:2px;min-width:0}
 .session-seg{flex:1 1 0;min-width:0;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:4px;font-size:13px;color:var(--muted);white-space:nowrap;background:color-mix(in srgb,var(--tier) 20%,transparent)}
 .session-seg.on{color:var(--fg);font-weight:600;background:color-mix(in srgb,var(--tier) 38%,transparent);box-shadow:inset 0 0 0 2px var(--tier)}
+/* 单一策略：优势与执行情况 */
+.edge{display:grid;gap:12px;padding:14px 16px}
+.edge-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.edge-head .c-t{display:flex;gap:8px;align-items:center}
+.edge .kpi{padding:0;box-shadow:none;border:0;background:none}
+.kpis-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.exec{display:grid;gap:12px}
+.cmp-row{grid-template-columns:minmax(0,1.6fr) .6fr 1fr 1fr}
+.cmp-row.thin>*{opacity:.72}
+.viol-row{grid-template-columns:minmax(0,2.4fr) .6fr .8fr}
+.warnbox{font-size:14px;color:var(--warn);background:var(--warn-bg);border-radius:6px;padding:6px 9px}
+/* 开仓清单 */
+.ck{display:grid;gap:8px;border:0;margin:0;padding:0;min-width:0}
+.ck legend{font-size:14px;color:var(--muted);padding:0;margin-bottom:5px}
+.ck-group{display:grid;gap:4px}
+.ck-sec{font-size:13px;color:var(--faint);margin-top:4px}
+.ck-item{align-items:flex-start;padding:5px 8px;border-radius:6px;background:var(--panel-2);font-size:15px;line-height:1.4}
+.ck-item input{margin-top:3px;flex:none}
+.ck-item .tag{font-size:12px;padding:0 6px}
+.ck-attn{background:var(--warn-bg)}
+.ck-line{font-size:14px;padding:3px 0}
+.ck-summary{display:grid;gap:2px}
+.ck-summary .neg{color:var(--neg)}
+details.rulebox summary{cursor:pointer}
+details.rulebox pre{white-space:pre-wrap;font:inherit;margin:8px 0 0}
+@media (max-width:760px){
+  .kpis-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .edge .kpi b{font-size:20px}
+  .cmp-row{grid-template-columns:minmax(0,1.4fr) .5fr .9fr .9fr;font-size:14px}
+  .viol-row{grid-template-columns:minmax(0,1fr) auto auto}
+}
+.history-row>.preserve{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
