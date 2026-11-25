@@ -102,7 +102,7 @@ sudo systemctl start journal
 
 如果新版本改坏了数据，还要把同一备份目录里的数据库文件一并恢复，方法见"备份与恢复"。
 
-**升级到单一策略版本（一次性）**：这一版不兼容旧数据库，遇到旧库会拒绝启动，也不会改动旧文件。照常运行 `update.sh`，它会先把旧库备份到 `/var/lib/journal-backup-日期时间/`；随后服务会启动失败（`is-active` 显示 `failed`，日志提示“旧版数据库不再兼容”）。确认备份目录里有 `journal.db` 后，删除旧库再启动：
+**升级到单一策略版本（一次性）**：这一版不兼容旧数据库，遇到旧库会拒绝启动，也不会改动旧文件。照常运行 `update.sh`，它会先把旧库备份到 `/var/lib/journal-backup-日期时间/`。随后新程序会拒绝启动并不断自动重启：`is-active` 显示 `activating` 或 `failed`，脚本因此提前退出，不会打印备份目录名；`sudo journalctl -u journal` 里能看到“旧版数据库不再兼容”。用 `ls -d /var/lib/journal-backup-*` 找到最新的备份目录，确认里面有 `journal.db` 后，删除旧库再启动：
 
 ```sh
 ssh server 'sudo systemctl stop journal; sudo rm -f /var/lib/journal/journal.db /var/lib/journal/journal.db-wal /var/lib/journal/journal.db-shm; sudo systemctl start journal; sudo systemctl is-active journal'
