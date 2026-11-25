@@ -5,44 +5,27 @@ import (
 	"sort"
 	"time"
 
+	"github.com/liugangdao/journal/internal/rules"
 	"github.com/liugangdao/journal/internal/stats"
 	"github.com/liugangdao/journal/internal/store"
 )
 
 type tradeView struct {
 	store.Trade
-	R   *float64 `json:"r,omitempty"`
-	MFE *float64 `json:"mfe,omitempty"`
-	MAE *float64 `json:"mae,omitempty"`
+	R          *float64 `json:"r,omitempty"`
+	MFE        *float64 `json:"mfe,omitempty"`
+	MAE        *float64 `json:"mae,omitempty"`
+	Violations []string `json:"violations"`
 }
 type openTradeView struct {
-	store.Trade
-	StrategyName string  `json:"strategy_name"`
-	VersionNo    int     `json:"version_no"`
-	RiskAmount   float64 `json:"risk_amount"`
+	tradeView
+	VersionNo  int     `json:"version_no"`
+	RiskAmount float64 `json:"risk_amount"`
 }
-type strategyView struct {
-	store.Strategy
-	CurrentVersion store.Version      `json:"current_version"`
-	Stats          stats.VersionStats `json:"stats"`
-}
-type versionView struct {
-	store.Version
-	Stats stats.VersionStats `json:"stats"`
-}
-type strategyDetail struct {
-	store.Strategy
-	Versions []versionView `json:"versions"`
-}
-type versionDetail struct {
-	Version  store.Version      `json:"version"`
-	Strategy store.Strategy     `json:"strategy"`
-	Stats    stats.VersionStats `json:"stats"`
-	Phases   []phaseView        `json:"phases"`
-	Trades   []tradeView        `json:"trades"`
-}
-type phaseView struct {
-	Phase      string  `json:"phase"`
+
+// groupView 是拆分后的描述性统计，样本小，不给置信区间和结论。
+type groupView struct {
+	Key        string  `json:"key"`
 	N          int     `json:"n"`
 	WinRate    float64 `json:"win_rate"`
 	Expectancy float64 `json:"expectancy"`
@@ -51,24 +34,63 @@ type phaseView struct {
 	AvgMFE     float64 `json:"avg_mfe"`
 	AvgMAE     float64 `json:"avg_mae"`
 }
-type totalsView struct {
-	ClosedN      int      `json:"closed_n"`
-	OpenN        int      `json:"open_n"`
-	TotalR       float64  `json:"total_r"`
-	FollowedRate *float64 `json:"followed_rate"`
-	ViolatedN    int      `json:"violated_n"`
-	ViolatedR    float64  `json:"violated_r"`
-	StrategiesN  int      `json:"strategies_n"`
-	VersionsN    int      `json:"versions_n"`
+type violationView struct {
+	Key    string  `json:"key"`
+	N      int     `json:"n"`
+	TotalR float64 `json:"total_r"`
+}
+type attentionView struct {
+	Key       string    `json:"key"`
+	Checked   groupView `json:"checked"`
+	Unchecked groupView `json:"unchecked"`
+}
+type executionView struct {
+	ClosedN        int      `json:"closed_n"`
+	FollowedN      int      `json:"followed_n"`
+	ViolatedN      int      `json:"violated_n"`
+	FollowedRate   *float64 `json:"followed_rate"`
+	ViolatedR      float64  `json:"violated_r"`
+	RecentN        int      `json:"recent_n"`
+	RecentViolated int      `json:"recent_violated"`
+}
+
+// report 同时回答两个问题：Edge 只用按规则执行的单子，回答策略本身有没有优势；
+// All 与 Execution 用全部单子，回答执行得怎么样。
+type report struct {
+	Edge       stats.VersionStats `json:"edge"`
+	All        stats.Summary      `json:"all"`
+	Execution  executionView      `json:"execution"`
+	Setups     []groupView        `json:"setups"`
+	Phases     []groupView        `json:"phases"`
+	Attention  []attentionView    `json:"attention"`
+	Violations []violationView    `json:"violations"`
+}
+type versionDetail struct {
+	Version    store.Version `json:"version"`
+	Definition rules.Version `json:"definition"`
+	Report     report        `json:"report"`
+	Trades     []tradeView   `json:"trades"`
+}
+type versionBrief struct {
+	Version    store.Version `json:"version"`
+	Definition rules.Version `json:"definition"`
+	Edge       stats.Summary `json:"edge_summary"`
+	Verdict    stats.Verdict `json:"verdict"`
+	Execution  executionView `json:"execution"`
+}
+type strategyDetail struct {
+	Strategy store.Strategy `json:"strategy"`
+	Versions []versionBrief `json:"versions"`
 }
 type overviewView struct {
 	Settings   store.Settings  `json:"settings"`
 	Equity     *float64        `json:"equity"`
 	LastEquity *float64        `json:"last_equity"`
-	Totals     totalsView      `json:"totals"`
+	Strategy   store.Strategy  `json:"strategy"`
+	Version    store.Version   `json:"version"`
+	Definition rules.Version   `json:"definition"`
+	Report     report          `json:"report"`
 	OpenTrades []openTradeView `json:"open_trades"`
-	Strategies []strategyView  `json:"strategies"`
-	ArchivedN  int             `json:"archived_n"`
 }
 
 func closedTrade(t store.Trade) stats.ClosedTrade {
@@ -79,8 +101,8 @@ func closedTrade(t store.Trade) stats.ClosedTrade {
 	return c
 }
 
-func viewTrade(t store.Trade) tradeView {
-	v := tradeView{Trade: t}
+func viewTrade(t store.Trade, def rules.Version) tradeView {
+	v := tradeView{Trade: t, Violations: store.Violations(t, def)}
 	if t.Status == "closed" {
 		c := closedTrade(t)
 		r := stats.RMultiple(c)
@@ -95,11 +117,11 @@ func viewTrade(t store.Trade) tradeView {
 
 // 每次请求使用同一数据库快照，统计只在内存中计算。
 type snapshot struct {
-	dump       store.Dump
-	strategies map[int64]store.Strategy
-	versions   map[int64]store.Version
-	current    map[int64]store.Version
-	trades     map[int64][]store.Trade
+	dump     store.Dump
+	def      rules.Definition
+	versions map[int64]store.Version
+	current  store.Version
+	trades   map[int64][]store.Trade
 }
 
 func loadSnapshot(s *store.Store) (snapshot, error) {
@@ -107,14 +129,11 @@ func loadSnapshot(s *store.Store) (snapshot, error) {
 	if err != nil {
 		return snapshot{}, err
 	}
-	v := snapshot{dump: d, strategies: map[int64]store.Strategy{}, versions: map[int64]store.Version{}, current: map[int64]store.Version{}, trades: map[int64][]store.Trade{}}
-	for _, a := range d.Strategies {
-		v.strategies[a.ID] = a
-	}
+	v := snapshot{dump: d, def: s.Definition(), versions: map[int64]store.Version{}, trades: map[int64][]store.Trade{}}
 	for _, version := range d.Versions {
 		v.versions[version.ID] = version
-		if version.No > v.current[version.StrategyID].No {
-			v.current[version.StrategyID] = version
+		if version.No > v.current.No {
+			v.current = version
 		}
 	}
 	for _, tr := range d.Trades {
@@ -122,49 +141,129 @@ func loadSnapshot(s *store.Store) (snapshot, error) {
 	}
 	return v, nil
 }
-func (s snapshot) compute(v store.Version) stats.VersionStats {
-	closed := []stats.ClosedTrade{}
-	for _, tr := range s.trades[v.ID] {
-		if tr.Status == "closed" {
-			closed = append(closed, closedTrade(tr))
-		}
+
+// versionDef 取版本在代码中的定义；数据库版本总是代码定义的前缀，打开数据库时已校验。
+func (s snapshot) versionDef(v store.Version) rules.Version {
+	d, _ := s.def.Version(v.No)
+	return d
+}
+func (s snapshot) tradeDef(t store.Trade) rules.Version { return s.versionDef(s.versions[t.VersionID]) }
+func (s snapshot) viewTrade(t store.Trade) tradeView    { return viewTrade(t, s.tradeDef(t)) }
+
+func group(key string, trades []store.Trade) groupView {
+	closed := make([]stats.ClosedTrade, len(trades))
+	for i, t := range trades {
+		closed[i] = closedTrade(t)
 	}
-	return stats.Compute(closed, stats.KillRule{RecentN: v.KillRecentN, RecentBelow: v.KillRecentBelow, MaxDDR: v.KillMaxDDR}, s.dump.Settings.MinSample)
+	st := stats.Compute(closed, stats.KillRule{}, 0)
+	return groupView{Key: key, N: st.Summary.N, WinRate: st.Summary.WinRate, Expectancy: st.Summary.Expectancy, TotalR: st.Summary.TotalR,
+		QualityN: st.Quality.N, AvgMFE: st.Quality.AvgMFE, AvgMAE: st.Quality.AvgMAE}
 }
 
-// phases 按开仓时的趋势阶段拆分已平仓交易。拆分后样本更小，只给描述性数字；
-// 四个阶段总是列出，旧交易未记录阶段时追加 phase 为空的一行。
-func (s snapshot) phases(v store.Version) []phaseView {
-	by := map[string][]stats.ClosedTrade{}
-	for _, tr := range s.trades[v.ID] {
-		if tr.Status != "closed" {
-			continue
-		}
-		key := ""
-		if tr.Phase != nil {
-			key = *tr.Phase
-		}
-		by[key] = append(by[key], closedTrade(tr))
+func byKey(trades []store.Trade, keys []string, key func(store.Trade) string) []groupView {
+	by := map[string][]store.Trade{}
+	for _, t := range trades {
+		by[key(t)] = append(by[key(t)], t)
 	}
-	keys := append([]string(nil), store.Phases...)
-	if len(by[""]) > 0 {
-		keys = append(keys, "")
-	}
-	out := make([]phaseView, 0, len(keys))
-	for _, key := range keys {
-		st := stats.Compute(by[key], stats.KillRule{}, 0)
-		out = append(out, phaseView{Phase: key, N: st.Summary.N, WinRate: st.Summary.WinRate, Expectancy: st.Summary.Expectancy, TotalR: st.Summary.TotalR,
-			QualityN: st.Quality.N, AvgMFE: st.Quality.AvgMFE, AvgMAE: st.Quality.AvgMAE})
+	out := make([]groupView, len(keys))
+	for i, k := range keys {
+		out[i] = group(k, by[k])
 	}
 	return out
 }
-func (s snapshot) strategyView(a store.Strategy) strategyView {
-	v := s.current[a.ID]
-	return strategyView{Strategy: a, CurrentVersion: v, Stats: s.compute(v)}
+
+func compute(trades []store.Trade, v store.Version, minSample int) stats.VersionStats {
+	closed := make([]stats.ClosedTrade, len(trades))
+	for i, t := range trades {
+		closed[i] = closedTrade(t)
+	}
+	return stats.Compute(closed, stats.KillRule{RecentN: v.KillRecentN, RecentBelow: v.KillRecentBelow, MaxDDR: v.KillMaxDDR}, minSample)
+}
+
+const recentN = 10
+
+func (s snapshot) report(v store.Version) report {
+	def := s.versionDef(v)
+	all, followed := []store.Trade{}, []store.Trade{}
+	for _, t := range s.trades[v.ID] {
+		if t.Status != "closed" {
+			continue
+		}
+		all = append(all, t)
+		if *t.FollowedRules {
+			followed = append(followed, t)
+		}
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].ClosedAt.Equal(*all[j].ClosedAt) {
+			return all[i].ID < all[j].ID
+		}
+		return all[i].ClosedAt.Before(*all[j].ClosedAt)
+	})
+	r := report{Edge: compute(followed, v, s.dump.Settings.MinSample), All: compute(all, v, 0).Summary,
+		Setups:     byKey(followed, rules.Setups, func(t store.Trade) string { return t.Setup }),
+		Phases:     byKey(followed, store.Phases, func(t store.Trade) string { return t.Phase }),
+		Attention:  []attentionView{},
+		Violations: []violationView{}}
+	e := &r.Execution
+	e.ClosedN, e.FollowedN = len(all), len(followed)
+	e.ViolatedN = e.ClosedN - e.FollowedN
+	if e.ClosedN > 0 {
+		rate := float64(e.FollowedN) / float64(e.ClosedN)
+		e.FollowedRate = &rate
+	}
+	counts := map[string]*violationView{}
+	for i, t := range all {
+		rm := stats.RMultiple(closedTrade(t))
+		if !*t.FollowedRules {
+			e.ViolatedR += rm
+			if i >= len(all)-recentN {
+				e.RecentViolated++
+			}
+		}
+		for _, k := range store.Violations(t, def) {
+			if counts[k] == nil {
+				counts[k] = &violationView{Key: k}
+			}
+			counts[k].N++
+			counts[k].TotalR += rm
+		}
+	}
+	e.RecentN = min(len(all), recentN)
+	// 按定义顺序收集，再按代价稳定排序，代价相同时保持定义顺序。
+	order := []string{rules.VegasDirKey}
+	for _, it := range def.Items {
+		order = append(order, it.Key)
+	}
+	for _, dv := range def.Deviations {
+		order = append(order, dv.Key)
+	}
+	for _, k := range order {
+		if c := counts[k]; c != nil {
+			r.Violations = append(r.Violations, *c)
+		}
+	}
+	sort.SliceStable(r.Violations, func(i, j int) bool { return r.Violations[i].TotalR < r.Violations[j].TotalR })
+	for _, it := range def.Items {
+		if it.Kind != rules.Attention {
+			continue
+		}
+		var on, off []store.Trade
+		for _, t := range followed {
+			if t.Checklist.Checks[it.Key] {
+				on = append(on, t)
+			} else {
+				off = append(off, t)
+			}
+		}
+		r.Attention = append(r.Attention, attentionView{Key: it.Key, Checked: group("checked", on), Unchecked: group("unchecked", off)})
+	}
+	return r
 }
 
 func (s snapshot) overview() overviewView {
-	o := overviewView{Settings: s.dump.Settings, OpenTrades: []openTradeView{}, Strategies: []strategyView{}, Totals: totalsView{StrategiesN: len(s.dump.Strategies), VersionsN: len(s.dump.Versions)}}
+	o := overviewView{Settings: s.dump.Settings, OpenTrades: []openTradeView{}, Strategy: s.dump.Strategies[0], Version: s.current,
+		Definition: s.versionDef(s.current), Report: s.report(s.current)}
 	if len(s.dump.Trades) > 0 {
 		e := s.dump.Trades[0].Equity
 		o.LastEquity = &e
@@ -174,91 +273,54 @@ func (s snapshot) overview() overviewView {
 	}
 	for _, t := range s.dump.Trades {
 		if t.Status == "open" {
-			o.Totals.OpenN++
-			v := s.versions[t.VersionID]
-			o.OpenTrades = append(o.OpenTrades, openTradeView{Trade: t, StrategyName: s.strategies[v.StrategyID].Name, VersionNo: v.No, RiskAmount: t.Qty * math.Abs(t.Entry-t.Stop)})
-			continue
-		}
-		o.Totals.ClosedN++
-		r := stats.RMultiple(closedTrade(t))
-		o.Totals.TotalR += r
-		if !*t.FollowedRules {
-			o.Totals.ViolatedN++
-			o.Totals.ViolatedR += r
-		}
-	}
-	if o.Totals.ClosedN > 0 {
-		rate := float64(o.Totals.ClosedN-o.Totals.ViolatedN) / float64(o.Totals.ClosedN)
-		o.Totals.FollowedRate = &rate
-	}
-	for _, a := range s.dump.Strategies {
-		if a.Archived {
-			o.ArchivedN++
-		} else {
-			o.Strategies = append(o.Strategies, s.strategyView(a))
+			o.OpenTrades = append(o.OpenTrades, openTradeView{tradeView: s.viewTrade(t), VersionNo: s.versions[t.VersionID].No, RiskAmount: t.Qty * math.Abs(t.Entry-t.Stop)})
 		}
 	}
 	return o
 }
 
-type monthStrategyView struct {
-	ID         int64   `json:"id"`
-	Name       string  `json:"name"`
-	Archived   bool    `json:"archived"`
-	N          int     `json:"n"`
-	WinRate    float64 `json:"win_rate"`
-	TotalR     float64 `json:"total_r"`
-	Expectancy float64 `json:"expectancy"`
-}
-type monthlyView struct {
-	From          time.Time           `json:"from"`
-	To            time.Time           `json:"to"`
-	N             int                 `json:"n"`
-	WinRate       float64             `json:"win_rate"`
-	AvgWin        float64             `json:"avg_win"`
-	AvgLoss       float64             `json:"avg_loss"`
-	Expectancy    float64             `json:"expectancy"`
-	TotalR        float64             `json:"total_r"`
-	MaxDrawdownR  float64             `json:"max_drawdown_r"`
-	MaxLossStreak int                 `json:"max_loss_streak"`
-	FollowedRate  *float64            `json:"followed_rate"`
-	ViolatedN     int                 `json:"violated_n"`
-	ViolatedR     float64             `json:"violated_r"`
-	Strategies    []monthStrategyView `json:"strategies"`
+func (s snapshot) strategy() strategyDetail {
+	out := strategyDetail{Strategy: s.dump.Strategies[0], Versions: []versionBrief{}}
+	for _, v := range s.dump.Versions {
+		r := s.report(v)
+		out.Versions = append(out.Versions, versionBrief{Version: v, Definition: s.versionDef(v), Edge: r.Edge.Summary, Verdict: r.Edge.Verdict, Execution: r.Execution})
+	}
+	return out
 }
 
-// monthly 统计平仓时间落在 [from, to) 内的交易；同一策略的各版本合并，归档策略也计入。
+type monthlyView struct {
+	From          time.Time `json:"from"`
+	To            time.Time `json:"to"`
+	N             int       `json:"n"`
+	WinRate       float64   `json:"win_rate"`
+	AvgWin        float64   `json:"avg_win"`
+	AvgLoss       float64   `json:"avg_loss"`
+	Expectancy    float64   `json:"expectancy"`
+	TotalR        float64   `json:"total_r"`
+	MaxDrawdownR  float64   `json:"max_drawdown_r"`
+	MaxLossStreak int       `json:"max_loss_streak"`
+	FollowedRate  *float64  `json:"followed_rate"`
+	ViolatedN     int       `json:"violated_n"`
+	ViolatedR     float64   `json:"violated_r"`
+}
+
+// monthly 统计平仓时间落在 [from, to) 内的交易，各版本合并。
 func (s snapshot) monthly(from, to time.Time) monthlyView {
 	all := []stats.ClosedTrade{}
-	by := map[int64][]stats.ClosedTrade{}
 	for _, t := range s.dump.Trades {
 		if t.Status != "closed" || t.ClosedAt.Before(from) || !t.ClosedAt.Before(to) {
 			continue
 		}
-		c := closedTrade(t)
-		all = append(all, c)
-		id := s.versions[t.VersionID].StrategyID
-		by[id] = append(by[id], c)
+		all = append(all, closedTrade(t))
 	}
 	// 月度样本太小，不输出置信区间与结论，只取描述性数字。
 	st := stats.Compute(all, stats.KillRule{}, 0)
 	m := monthlyView{From: from, To: to, N: st.Summary.N, WinRate: st.Summary.WinRate, AvgWin: st.Summary.AvgWin, AvgLoss: st.Summary.AvgLoss,
 		Expectancy: st.Summary.Expectancy, TotalR: st.Summary.TotalR, MaxDrawdownR: st.Summary.MaxDrawdownR, MaxLossStreak: st.Summary.MaxLossStreak,
-		ViolatedN: st.Rules.ViolatedN, ViolatedR: st.Rules.ViolatedR, Strategies: []monthStrategyView{}}
+		ViolatedN: st.Rules.ViolatedN, ViolatedR: st.Rules.ViolatedR}
 	if m.N > 0 {
 		rate := float64(st.Rules.FollowedN) / float64(m.N)
 		m.FollowedRate = &rate
 	}
-	for id, trades := range by {
-		a, sum := s.strategies[id], stats.Compute(trades, stats.KillRule{}, 0).Summary
-		m.Strategies = append(m.Strategies, monthStrategyView{ID: id, Name: a.Name, Archived: a.Archived, N: sum.N, WinRate: sum.WinRate, TotalR: sum.TotalR, Expectancy: sum.Expectancy})
-	}
-	sort.Slice(m.Strategies, func(i, j int) bool {
-		a, b := m.Strategies[i], m.Strategies[j]
-		if a.TotalR != b.TotalR {
-			return a.TotalR > b.TotalR
-		}
-		return a.ID < b.ID
-	})
 	return m
 }

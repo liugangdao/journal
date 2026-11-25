@@ -33,99 +33,13 @@ func (a *api) monthly(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.monthly(from.UTC(), to.UTC()))
 }
 
-func (a *api) strategies(w http.ResponseWriter, r *http.Request) {
-	s, err := loadSnapshot(a.store)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	vs := []strategyView{}
-	for _, strategy := range s.dump.Strategies {
-		if !strategy.Archived || r.URL.Query().Get("archived") == "1" {
-			vs = append(vs, s.strategyView(strategy))
-		}
-	}
-	writeJSON(w, http.StatusOK, vs)
-}
-
-func (a *api) createStrategy(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Name string `json:"name"`
-		store.VersionInput
-	}
-	if !readJSON(w, r, &in) {
-		return
-	}
-	strategy, v, err := a.store.CreateStrategy(in.Name, in.VersionInput)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, struct {
-		store.Strategy
-		CurrentVersion store.Version `json:"current_version"`
-	}{strategy, v})
-}
-
 func (a *api) strategy(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
 	s, err := loadSnapshot(a.store)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	strategy, ok := s.strategies[id]
-	if !ok {
-		writeError(w, store.ErrNotFound)
-		return
-	}
-	out := strategyDetail{Strategy: strategy, Versions: []versionView{}}
-	for _, v := range s.dump.Versions {
-		if v.StrategyID == id {
-			out.Versions = append(out.Versions, versionView{Version: v, Stats: s.compute(v)})
-		}
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-func (a *api) updateStrategy(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	var in struct {
-		Name     *string `json:"name"`
-		Archived *bool   `json:"archived"`
-	}
-	if !readJSON(w, r, &in) {
-		return
-	}
-	v, err := a.store.UpdateStrategy(id, in.Name, in.Archived)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, v)
-}
-
-func (a *api) createVersion(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	var in store.VersionInput
-	if !readJSON(w, r, &in) {
-		return
-	}
-	v, err := a.store.CreateVersion(id, in)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, v)
+	writeJSON(w, http.StatusOK, s.strategy())
 }
 
 func (a *api) versionStats(w http.ResponseWriter, r *http.Request) {
@@ -143,9 +57,9 @@ func (a *api) versionStats(w http.ResponseWriter, r *http.Request) {
 		writeError(w, store.ErrNotFound)
 		return
 	}
-	out := versionDetail{Version: v, Strategy: s.strategies[v.StrategyID], Stats: s.compute(v), Phases: s.phases(v), Trades: []tradeView{}}
+	out := versionDetail{Version: v, Definition: s.versionDef(v), Report: s.report(v), Trades: []tradeView{}}
 	for _, t := range s.trades[id] {
-		out.Trades = append(out.Trades, viewTrade(t))
+		out.Trades = append(out.Trades, s.viewTrade(t))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -160,7 +74,7 @@ func (a *api) openTrade(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, viewTrade(v))
+	a.writeTrade(w, http.StatusCreated, v)
 }
 
 func (a *api) closeTrade(w http.ResponseWriter, r *http.Request) {
@@ -177,7 +91,7 @@ func (a *api) closeTrade(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, viewTrade(v))
+	a.writeTrade(w, http.StatusOK, v)
 }
 
 func (a *api) updateTrade(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +112,7 @@ func (a *api) updateTrade(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, viewTrade(v))
+	a.writeTrade(w, http.StatusOK, v)
 }
 
 func (a *api) deleteTrade(w http.ResponseWriter, r *http.Request) {
@@ -279,4 +193,13 @@ func (a *api) importDump(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (a *api) writeTrade(w http.ResponseWriter, status int, t store.Trade) {
+	def, err := a.store.VersionDef(t.VersionID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, status, viewTrade(t, def))
 }

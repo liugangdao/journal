@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,12 +15,13 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/liugangdao/journal/internal/rules"
 	"github.com/liugangdao/journal/internal/store"
 )
 
 func setup(t *testing.T) (*store.Store, *httptest.Server) {
 	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "journal.db"))
+	s, err := store.Open(filepath.Join(t.TempDir(), "journal.db"), rules.Current)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,13 +76,277 @@ func object(v map[string]any, key string) map[string]any { return v[key].(map[st
 func items(v map[string]any, key string) []any           { return v[key].([]any) }
 func number(v map[string]any, key string) float64        { return v[key].(float64) }
 func id(v map[string]any) int64                          { return int64(number(v, "id")) }
-func newStrategy(t *testing.T, s *httptest.Server) map[string]any {
-	t.Helper()
-	return call(t, s, "POST", "/api/strategies", `{"name":"趋势","rules":"突破"}`, 201)
+
+// tradeBody 返回一笔全部规则项都满足的突破多单请求体，change 可在编码前修改字段。
+func tradeBody(change func(map[string]any)) string {
+	checks := map[string]any{}
+	for _, it := range rules.Current.Versions[0].Items {
+		if it.Kind == rules.Rule && it.Setup != rules.Pullback {
+			checks[it.Key] = true
+		}
+	}
+	m := map[string]any{"symbol": "btc", "side": "long", "entry": 100, "stop": 95, "equity": 10000, "risk_pct": 1, "qty": 0, "entry_reason": "突破", "phase": "early",
+		"setup": "breakout", "key_level": 94, "exit_plan": "trail", "checklist": map[string]any{"vegas_dir": "long", "checks": checks}}
+	if change != nil {
+		change(m)
+	}
+	b, _ := json.Marshal(m)
+	return string(b)
 }
-func newTrade(t *testing.T, s *httptest.Server, strategy int64) map[string]any {
+func checks(m map[string]any) map[string]any {
+	return m["checklist"].(map[string]any)["checks"].(map[string]any)
+}
+func newTrade(t *testing.T, s *httptest.Server, change func(map[string]any)) map[string]any {
 	t.Helper()
-	return call(t, s, "POST", "/api/trades", fmt.Sprintf(`{"strategy_id":%d,"symbol":"btc","side":"long","entry":100,"stop":95,"equity":10000,"risk_pct":1,"qty":0,"entry_reason":"突破","phase":"early"}`, strategy), 201)
+	return call(t, s, "POST", "/api/trades", tradeBody(change), 201)
+}
+
+// closed 开仓并平仓，返回平仓后的交易。入场 100、止损 95：出场 110 为 +2R，95 为 -1R。
+func closed(t *testing.T, s *httptest.Server, change func(map[string]any), exit float64, deviations string) map[string]any {
+	t.Helper()
+	tr := newTrade(t, s, change)
+	return call(t, s, "POST", fmt.Sprintf("/api/trades/%d/close", id(tr)), fmt.Sprintf(`{"exit":%v,"exit_reason":"manual","deviations":%s}`, exit, deviations), 200)
+}
+func strs(v any) []string {
+	out := []string{}
+	for _, x := range v.([]any) {
+		out = append(out, x.(string))
+	}
+	return out
+}
+
+func TestFullFlowSingleStrategy(t *testing.T) {
+	_, s := setup(t)
+	o := call(t, s, "GET", "/api/overview", "", 200)
+	if object(o, "strategy")["name"] != "Vegas 顺势" || len(items(object(o, "definition"), "items")) == 0 || o["last_equity"] != nil {
+		t.Fatal(o)
+	}
+	bad := newTrade(t, s, func(m map[string]any) { checks(m)["accept_loss"] = false })
+	if !reflect.DeepEqual(strs(bad["violations"]), []string{"accept_loss"}) {
+		t.Fatal(bad["violations"])
+	}
+	o = call(t, s, "GET", "/api/overview", "", 200)
+	open := items(o, "open_trades")[0].(map[string]any)
+	if number(open, "version_no") != 1 || number(open, "risk_amount") != 100 || len(strs(open["violations"])) != 1 {
+		t.Fatal(open)
+	}
+	path := fmt.Sprintf("/api/trades/%d", id(bad))
+	c := call(t, s, "POST", path+"/close", `{"exit":110,"exit_reason":"target","high":112,"low":97,"deviations":[]}`, 200)
+	if number(c, "r") != 2 || number(c, "mfe") != 2.4 || number(c, "mae") != 0.6 || c["followed_rules"] != false {
+		t.Fatal(c)
+	}
+	call(t, s, "POST", path+"/close", `{"exit":90,"exit_reason":"stop"}`, 409)
+	r := object(call(t, s, "GET", "/api/overview", "", 200), "report")
+	if number(object(r, "execution"), "violated_n") != 1 || number(object(object(r, "edge"), "summary"), "n") != 0 || number(object(r, "all"), "n") != 1 {
+		t.Fatal(r)
+	}
+	good := closed(t, s, nil, 95, "[]")
+	if good["followed_rules"] != true {
+		t.Fatal(good)
+	}
+	o = call(t, s, "GET", "/api/overview", "", 200)
+	r = object(o, "report")
+	if number(object(object(r, "edge"), "summary"), "n") != 1 || number(object(r, "execution"), "followed_rate") != 0.5 || number(object(r, "all"), "total_r") != 1 {
+		t.Fatal(r)
+	}
+	_, headers, b := request(t, s, "GET", "/api/export", "", "Bearer t0ken", 200)
+	if !strings.HasPrefix(headers.Get("Content-Disposition"), `attachment; filename="journal-`) {
+		t.Fatal(headers)
+	}
+	call(t, s, "POST", "/api/import", string(b), 200)
+	if after := call(t, s, "GET", "/api/overview", "", 200); !reflect.DeepEqual(o, after) {
+		t.Fatalf("导入前后不同：%v %v", o, after)
+	}
+}
+
+func TestReportGroups(t *testing.T) {
+	_, s := setup(t)
+	closed(t, s, nil, 110, "[]")
+	closed(t, s, func(m map[string]any) { checks(m)["after_climax"] = true }, 95, "[]")
+	closed(t, s, func(m map[string]any) {
+		m["setup"] = "pullback"
+		c := checks(m)
+		delete(c, "bo_trend_clear")
+		delete(c, "bo_bars_ok")
+		c["pb_key_level"], c["pb_second_entry"], c["pb_signal_bar"] = true, true, true
+	}, 110, "[]")
+	closed(t, s, func(m map[string]any) { m["phase"] = "late" }, 95, `["moved_stop"]`)
+	r := object(call(t, s, "GET", "/api/overview", "", 200), "report")
+	setups := items(r, "setups")
+	bo, pb := setups[0].(map[string]any), setups[1].(map[string]any)
+	if bo["key"] != "breakout" || number(bo, "n") != 2 || pb["key"] != "pullback" || number(pb, "n") != 1 {
+		t.Fatal(setups)
+	}
+	att := items(r, "attention")[0].(map[string]any)
+	if att["key"] != "after_climax" || number(object(att, "checked"), "n") != 1 || number(object(att, "unchecked"), "n") != 2 {
+		t.Fatal(att)
+	}
+	vs := items(r, "violations")
+	if len(vs) != 1 || vs[0].(map[string]any)["key"] != "moved_stop" || number(vs[0].(map[string]any), "n") != 1 || number(vs[0].(map[string]any), "total_r") != -1 {
+		t.Fatal(vs)
+	}
+	phases := items(r, "phases")
+	if len(phases) != 4 || number(phases[0].(map[string]any), "n") != 3 || number(phases[2].(map[string]any), "n") != 0 {
+		t.Fatal("违规单不应进入阶段拆分：", phases)
+	}
+}
+
+func TestViolationOrder(t *testing.T) {
+	_, s := setup(t)
+	closed(t, s, nil, 110, `["early_exit"]`)
+	closed(t, s, func(m map[string]any) { checks(m)["stop_order"] = false }, 95, "[]")
+	closed(t, s, func(m map[string]any) { checks(m)["stop_order"] = false }, 95, "[]")
+	vs := items(object(call(t, s, "GET", "/api/overview", "", 200), "report"), "violations")
+	if len(vs) != 2 || vs[0].(map[string]any)["key"] != "stop_order" || number(vs[0].(map[string]any), "total_r") != -2 {
+		t.Fatal("应按累计 R 升序：", vs)
+	}
+}
+
+func TestRecentViolations(t *testing.T) {
+	_, s := setup(t)
+	for i := range 12 {
+		devs := "[]"
+		if i == 0 || i == 1 || i == 5 || i == 8 || i == 11 {
+			devs = `["early_exit"]`
+		}
+		closed(t, s, nil, 110, devs)
+	}
+	e := object(object(call(t, s, "GET", "/api/overview", "", 200), "report"), "execution")
+	if number(e, "recent_n") != 10 || number(e, "recent_violated") != 3 || number(e, "closed_n") != 12 {
+		t.Fatal(e)
+	}
+}
+
+func TestOldStrategyRoutesGone(t *testing.T) {
+	_, s := setup(t)
+	call(t, s, "POST", "/api/strategies", `{"name":"x"}`, 404)
+	call(t, s, "PATCH", "/api/strategies/1", `{"archived":true}`, 404)
+	call(t, s, "POST", "/api/strategies/1/versions", `{"rules":"x"}`, 404)
+	st := call(t, s, "GET", "/api/strategy", "", 200)
+	vs := items(st, "versions")
+	if object(st, "strategy")["name"] != "Vegas 顺势" || len(vs) != 1 || object(vs[0].(map[string]any), "definition")["rules"] == "" {
+		t.Fatal(st)
+	}
+}
+
+func TestOpenRejectsBadInput(t *testing.T) {
+	_, s := setup(t)
+	call(t, s, "POST", "/api/trades", tradeBody(func(m map[string]any) { m["strategy_id"] = 1 }), 400)
+	for _, change := range []func(map[string]any){
+		func(m map[string]any) { m["entry"] = 0 }, func(m map[string]any) { m["entry"] = "abc" }, func(m map[string]any) { m["entry"] = "68,420.5" },
+		func(m map[string]any) { m["entry"] = nil }, func(m map[string]any) { m["qty"] = -1 }, func(m map[string]any) { m["equity"] = 0 },
+		func(m map[string]any) { m["stop"] = 100 }, func(m map[string]any) { delete(m, "phase") }, func(m map[string]any) { m["phase"] = "top" },
+		func(m map[string]any) { m["key_level"] = 0 }, func(m map[string]any) { m["setup"] = "" }, func(m map[string]any) { checks(m)["pb_signal_bar"] = true },
+	} {
+		call(t, s, "POST", "/api/trades", tradeBody(change), 400)
+	}
+	call(t, s, "POST", "/api/trades", strings.Replace(tradeBody(nil), `"entry":100`, `"entry":1e999`, 1), 400)
+	if o := call(t, s, "GET", "/api/overview", "", 200); len(items(o, "open_trades")) != 0 {
+		t.Fatal("非法开仓写入")
+	}
+}
+
+func TestPatchRejectsChecklistFields(t *testing.T) {
+	_, s := setup(t)
+	tr := newTrade(t, s, nil)
+	path := fmt.Sprintf("/api/trades/%d", id(tr))
+	for _, body := range []string{`{"setup":"pullback"}`, `{"checklist":{}}`, `{"phase":"late"}`, `{"key_level":1}`, `{"followed_rules":true}`} {
+		call(t, s, "PATCH", path, body, 400)
+	}
+	patched := call(t, s, "PATCH", path, `{"version_id":99,"symbol":"ETH"}`, 200)
+	if number(patched, "version_id") != number(tr, "version_id") || patched["symbol"] != "ETH" {
+		t.Fatal(patched)
+	}
+	call(t, s, "PATCH", path, `{"stop":100}`, 400)
+	call(t, s, "POST", path+"/close", `{"exit":110,"exit_reason":"target"}`, 200)
+	after := call(t, s, "PATCH", path, `{"deviations":["moved_stop"]}`, 200)
+	if after["followed_rules"] != false || !reflect.DeepEqual(strs(after["violations"]), []string{"moved_stop"}) {
+		t.Fatal(after)
+	}
+	detail := call(t, s, "GET", fmt.Sprintf("/api/versions/%d/stats", int64(number(tr, "version_id"))), "", 200)
+	if number(items(detail, "trades")[0].(map[string]any), "stop") != 95 || object(detail, "definition")["no"] != 1.0 {
+		t.Fatal(detail)
+	}
+}
+
+func TestImportInvalid(t *testing.T) {
+	st, s := setup(t)
+	newTrade(t, s, nil)
+	before, err := st.Export()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := before
+	bad.Trades = append([]store.Trade(nil), before.Trades...)
+	bad.Trades[0].VersionID = 999
+	b, _ := json.Marshal(bad)
+	call(t, s, "POST", "/api/import", string(b), 400)
+	call(t, s, "POST", "/api/import", `{"trades":[{"version_id":999}]}`, 400)
+	after, err := st.Export()
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("非法导入改变数据 %v", err)
+	}
+}
+
+func TestJSONNamesAndUTCTimes(t *testing.T) {
+	_, s := setup(t)
+	tr := newTrade(t, s, nil)
+	o := call(t, s, "GET", "/api/overview", "", 200)
+	for _, v := range []map[string]any{o, object(o, "strategy"), object(o, "report"), object(object(o, "report"), "execution"), tr} {
+		for key := range v {
+			if strings.ContainsFunc(key, unicode.IsUpper) {
+				t.Fatalf("字段不是 snake_case：%s", key)
+			}
+		}
+	}
+	for _, v := range []string{object(o, "strategy")["created_at"].(string), tr["opened_at"].(string)} {
+		at, err := time.Parse(time.RFC3339, v)
+		if err != nil || !strings.HasSuffix(v, "Z") || at.Location() != time.UTC {
+			t.Fatalf("时间格式 %s %v", v, err)
+		}
+	}
+}
+
+func TestMonthly(t *testing.T) {
+	st, s := setup(t)
+	win := id(closed(t, s, nil, 110, "[]"))
+	loss := id(closed(t, s, nil, 95, "[]"))
+	win2 := id(closed(t, s, nil, 105, "[]"))
+	bad := id(closed(t, s, nil, 90, `["early_exit"]`))
+	edge := id(closed(t, s, nil, 110, "[]"))
+	prev := id(closed(t, s, nil, 110, "[]"))
+	newTrade(t, s, nil) // 持仓中，不计入。
+	d, err := st.Export()
+	if err != nil {
+		t.Fatal(err)
+	}
+	from, to := time.Date(2026, 10, 31, 16, 0, 0, 0, time.UTC), time.Date(2026, 11, 30, 16, 0, 0, 0, time.UTC)
+	at := map[int64]time.Time{win: from, loss: from.Add(time.Hour), win2: from.Add(2 * time.Hour), bad: from.Add(3 * time.Hour), edge: to, prev: from.Add(-time.Second)}
+	for i := range d.Trades {
+		if c, ok := at[d.Trades[i].ID]; ok {
+			d.Trades[i].OpenedAt = c.Add(-time.Minute)
+			d.Trades[i].ClosedAt = &c
+		}
+	}
+	if err = st.Import(d); err != nil {
+		t.Fatal(err)
+	}
+	// 用带偏移的时间传入，等价于东八区的 11 月。
+	m := call(t, s, "GET", "/api/monthly?from=2026-11-01T00:00:00%2B08:00&to=2026-12-01T00:00:00%2B08:00", "", 200)
+	if number(m, "n") != 4 || number(m, "total_r") != 0 || number(m, "win_rate") != 0.5 || number(m, "avg_win") != 1.5 || number(m, "avg_loss") != -1.5 ||
+		number(m, "max_drawdown_r") != 2 || number(m, "max_loss_streak") != 1 || number(m, "followed_rate") != 0.75 || number(m, "violated_n") != 1 || number(m, "violated_r") != -2 {
+		t.Fatal(m)
+	}
+	if _, ok := m["strategies"]; ok {
+		t.Fatal("月度不应再按策略分组")
+	}
+	empty := call(t, s, "GET", "/api/monthly?from=2020-01-01T00:00:00Z&to=2020-02-01T00:00:00Z", "", 200)
+	if number(empty, "n") != 0 || empty["followed_rate"] != nil {
+		t.Fatal(empty)
+	}
+	for _, q := range []string{"", "?from=2026-11-01T00:00:00Z", "?from=x&to=y", "?from=2026-12-01T00:00:00Z&to=2026-11-01T00:00:00Z"} {
+		call(t, s, "GET", "/api/monthly"+q, "", 400)
+	}
 }
 
 func TestAuthRequired(t *testing.T) {
@@ -103,151 +367,6 @@ func TestAuthRequired(t *testing.T) {
 	}
 }
 
-func TestFullFlow(t *testing.T) {
-	_, s := setup(t)
-	a := newStrategy(t, s)
-	v1 := object(a, "current_version")
-	if number(v1, "no") != 1 {
-		t.Fatal(a)
-	}
-	tr := newTrade(t, s, id(a))
-	path := fmt.Sprintf("/api/trades/%d", id(tr))
-	o := call(t, s, "GET", "/api/overview", "", 200)
-	if number(object(o, "totals"), "open_n") != 1 || number(o, "last_equity") != 10000 {
-		t.Fatal(o)
-	}
-	closed := call(t, s, "POST", path+"/close", `{"exit":110,"exit_reason":"target","followed_rules":true,"high":112,"low":97}`, 200)
-	if number(closed, "r") != 2 || number(closed, "mfe") != 2.4 || number(closed, "mae") != 0.6 {
-		t.Fatal(closed)
-	}
-	call(t, s, "POST", path+"/close", `{"exit":90,"exit_reason":"stop"}`, 409)
-	v2 := call(t, s, "POST", fmt.Sprintf("/api/strategies/%d/versions", id(a)), `{"rules":"新规则"}`, 201)
-	if number(v2, "no") != 2 {
-		t.Fatal(v2)
-	}
-	o = call(t, s, "GET", "/api/overview", "", 200)
-	current := items(o, "strategies")[0].(map[string]any)
-	if number(object(object(current, "stats"), "summary"), "n") != 0 {
-		t.Fatal(current)
-	}
-	v1stats := call(t, s, "GET", fmt.Sprintf("/api/versions/%d/stats", id(v1)), "", 200)
-	if number(object(object(v1stats, "stats"), "summary"), "n") != 1 {
-		t.Fatal(v1stats)
-	}
-	_, headers, b := request(t, s, "GET", "/api/export", "", "Bearer t0ken", 200)
-	if !strings.HasPrefix(headers.Get("Content-Disposition"), `attachment; filename="journal-`) {
-		t.Fatal(headers)
-	}
-	call(t, s, "POST", "/api/import", string(b), 200)
-	after := call(t, s, "GET", "/api/overview", "", 200)
-	if !reflect.DeepEqual(o, after) {
-		t.Fatalf("导入前后不同：%v %v", o, after)
-	}
-}
-
-func TestOpenTradeRejectsBadNumbers(t *testing.T) {
-	_, s := setup(t)
-	a := newStrategy(t, s)
-	for _, field := range []string{`"entry":0`, `"entry":-1`, `"entry":"abc"`, `"entry":"68,420.5"`, `"entry":1e999`, `"entry":null`, `"entry":100,"qty":-1`, `"entry":100,"equity":0`, `"entry":100,"stop":100`} {
-		body := fmt.Sprintf(`{"strategy_id":%d,"symbol":"BTC","side":"long","stop":95,"equity":10000,"risk_pct":1,"entry_reason":"突破","phase":"early",%s}`, id(a), field)
-		call(t, s, "POST", "/api/trades", body, 400)
-	}
-	o := call(t, s, "GET", "/api/overview", "", 200)
-	if number(object(o, "totals"), "open_n") != 0 {
-		t.Fatal("非法数字写入")
-	}
-}
-
-func TestImportInvalid(t *testing.T) {
-	st, s := setup(t)
-	a := newStrategy(t, s)
-	newTrade(t, s, id(a))
-	before, err := st.Export()
-	if err != nil {
-		t.Fatal(err)
-	}
-	bad := before
-	bad.Trades = append([]store.Trade(nil), before.Trades...)
-	bad.Trades[0].VersionID = 999
-	b, _ := json.Marshal(bad)
-	call(t, s, "POST", "/api/import", string(b), 400)
-	call(t, s, "POST", "/api/import", `{"trades":[{"version_id":999}]}`, 400)
-	after, err := st.Export()
-	if err != nil || !reflect.DeepEqual(before, after) {
-		t.Fatalf("非法导入改变数据 %v", err)
-	}
-}
-
-func TestTradePatchKeepsVersionAndRevalidates(t *testing.T) {
-	_, s := setup(t)
-	a := newStrategy(t, s)
-	tr := newTrade(t, s, id(a))
-	path := fmt.Sprintf("/api/trades/%d", id(tr))
-	call(t, s, "POST", path+"/close", `{"exit":110,"exit_reason":"target","followed_rules":true}`, 200)
-	v2 := call(t, s, "POST", fmt.Sprintf("/api/strategies/%d/versions", id(a)), `{"rules":"新规则"}`, 201)
-	patched := call(t, s, "PATCH", path, fmt.Sprintf(`{"version_id":%d,"symbol":"ETH"}`, id(v2)), 200)
-	if number(patched, "version_id") != number(tr, "version_id") || patched["symbol"] != "ETH" {
-		t.Fatal(patched)
-	}
-	call(t, s, "PATCH", path, `{"stop":100}`, 400)
-	call(t, s, "PATCH", path, `{"stop":105}`, 400)
-	result := call(t, s, "GET", fmt.Sprintf("/api/versions/%d/stats", int64(number(tr, "version_id"))), "", 200)
-	if number(items(result, "trades")[0].(map[string]any), "stop") != 95 {
-		t.Fatal(result)
-	}
-}
-
-func TestOverviewArchivedOldVersionsAndEmpty(t *testing.T) {
-	_, s := setup(t)
-	o := call(t, s, "GET", "/api/overview", "", 200)
-	if o["last_equity"] != nil || object(o, "totals")["followed_rate"] != nil || len(items(o, "strategies")) != 0 || len(items(o, "open_trades")) != 0 {
-		t.Fatal(o)
-	}
-	if number(object(o, "settings"), "risk_pct") != 1 || number(object(o, "settings"), "min_sample") != 30 {
-		t.Fatal(o)
-	}
-	a := newStrategy(t, s)
-	tr := newTrade(t, s, id(a))
-	call(t, s, "POST", fmt.Sprintf("/api/trades/%d/close", id(tr)), `{"exit":110,"exit_reason":"target","followed_rules":true}`, 200)
-	call(t, s, "POST", fmt.Sprintf("/api/strategies/%d/versions", id(a)), `{"rules":"第二版"}`, 201)
-	tr = newTrade(t, s, id(a))
-	call(t, s, "POST", fmt.Sprintf("/api/trades/%d/close", id(tr)), `{"exit":95,"exit_reason":"stop","followed_rules":false}`, 200)
-	newTrade(t, s, id(a))
-	call(t, s, "PATCH", fmt.Sprintf("/api/strategies/%d", id(a)), `{"archived":true}`, 200)
-	o = call(t, s, "GET", "/api/overview", "", 200)
-	totals := object(o, "totals")
-	for key, want := range map[string]float64{"closed_n": 2, "open_n": 1, "total_r": 1, "followed_rate": 0.5, "violated_n": 1, "violated_r": -1, "strategies_n": 1, "versions_n": 2} {
-		if number(totals, key) != want {
-			t.Fatalf("%s: %v", key, totals)
-		}
-	}
-	if number(o, "archived_n") != 1 || len(items(o, "strategies")) != 0 {
-		t.Fatal(o)
-	}
-	open := items(o, "open_trades")[0].(map[string]any)
-	if open["strategy_name"] != "趋势" || number(open, "version_no") != 2 || number(open, "risk_amount") != 100 {
-		t.Fatal(open)
-	}
-	_, _, b := request(t, s, "GET", "/api/strategies", "", "Bearer t0ken", 200)
-	if string(bytes.TrimSpace(b)) != "[]" {
-		t.Fatalf("归档策略仍显示：%s", b)
-	}
-	_, _, b = request(t, s, "GET", "/api/strategies?archived=1", "", "Bearer t0ken", 200)
-	var list []any
-	if err := json.Unmarshal(b, &list); err != nil || len(list) != 1 {
-		t.Fatalf("全部策略 %s %v", b, err)
-	}
-	detail := call(t, s, "GET", fmt.Sprintf("/api/strategies/%d", id(a)), "", 200)
-	if len(items(detail, "versions")) != 2 {
-		t.Fatal(detail)
-	}
-	for _, v := range items(detail, "versions") {
-		if number(object(object(v.(map[string]any), "stats"), "summary"), "n") != 1 {
-			t.Fatal(v)
-		}
-	}
-}
-
 func TestSettingsErrorsAndDelete(t *testing.T) {
 	_, s := setup(t)
 	call(t, s, "PUT", "/api/settings", `{"risk_pct":2,"min_sample":10}`, 200)
@@ -256,13 +375,11 @@ func TestSettingsErrorsAndDelete(t *testing.T) {
 		t.Fatal(st)
 	}
 	call(t, s, "PUT", "/api/settings", `{"risk_pct":101,"min_sample":1}`, 400)
-	a := newStrategy(t, s)
-	call(t, s, "POST", "/api/strategies", `{"name":"趋势"}`, 409)
-	for _, path := range []string{"/api/strategies/999", "/api/versions/999/stats", "/api/missing"} {
+	for _, path := range []string{"/api/versions/999/stats", "/api/missing"} {
 		call(t, s, "GET", path, "", 404)
 	}
-	call(t, s, "GET", "/api/strategies/abc", "", 400)
-	tr := newTrade(t, s, id(a))
+	call(t, s, "GET", "/api/versions/abc/stats", "", 400)
+	tr := newTrade(t, s, nil)
 	path := fmt.Sprintf("/api/trades/%d", id(tr))
 	call(t, s, "DELETE", path, "", 204)
 	call(t, s, "DELETE", path, "", 404)
@@ -272,20 +389,18 @@ func TestSettingsErrorsAndDelete(t *testing.T) {
 
 func TestJSONBodyAndLimit(t *testing.T) {
 	_, s := setup(t)
-	for _, body := range []string{"", "null", "[]", `{"name":`, `{"name":"a"} {}`, `{"name":"a","unknown":1}`, `{"name":"` + strings.Repeat("x", 10*1024*1024) + `"}`} {
-		v := call(t, s, "POST", "/api/strategies", body, 400)
+	for _, body := range []string{"", "null", "[]", `{"balance":`, `{"balance":1} {}`, `{"balance":1,"unknown":1}`, `{"reason":"` + strings.Repeat("x", 10*1024*1024) + `"}`} {
+		v := call(t, s, "POST", "/api/equity/calibrations", body, 400)
 		if v["error"] != "请求格式不正确" {
 			t.Fatal(v)
 		}
 	}
-	body := `{"name":"合法","rules":"` + strings.Repeat("x", 1024) + `"}`
-	call(t, s, "POST", "/api/strategies", body, 201)
+	call(t, s, "POST", "/api/equity/calibrations", `{"balance":1,"reason":"`+strings.Repeat("x", 1024)+`"}`, 201)
 }
 
 func TestConcurrentHTTPClose(t *testing.T) {
 	_, s := setup(t)
-	a := newStrategy(t, s)
-	tr := newTrade(t, s, id(a))
+	tr := newTrade(t, s, nil)
 	var wg sync.WaitGroup
 	codes := make(chan int, 2)
 	errs := make(chan error, 2)
@@ -388,119 +503,6 @@ func TestStaticRevalidates(t *testing.T) {
 	}
 }
 
-func TestJSONNamesAndUTCTimes(t *testing.T) {
-	_, s := setup(t)
-	a := newStrategy(t, s)
-	tr := newTrade(t, s, id(a))
-	for _, v := range []map[string]any{a, object(a, "current_version"), tr} {
-		for key := range v {
-			if strings.ContainsFunc(key, unicode.IsUpper) {
-				t.Fatalf("字段不是 snake_case：%s", key)
-			}
-		}
-	}
-	for _, v := range []string{a["created_at"].(string), tr["opened_at"].(string)} {
-		at, err := time.Parse(time.RFC3339, v)
-		if err != nil || !strings.HasSuffix(v, "Z") || at.Location() != time.UTC {
-			t.Fatalf("时间格式 %s %v", v, err)
-		}
-	}
-}
-
-func TestMonthly(t *testing.T) {
-	st, s := setup(t)
-	a := newStrategy(t, s)
-	b := call(t, s, "POST", "/api/strategies", `{"name":"反转","rules":"背离"}`, 201)
-	closeAt := func(strategy int64, exit float64, followed bool) int64 {
-		tr := newTrade(t, s, strategy)
-		call(t, s, "POST", fmt.Sprintf("/api/trades/%d/close", id(tr)), fmt.Sprintf(`{"exit":%v,"exit_reason":"manual","followed_rules":%v}`, exit, followed), 200)
-		return id(tr)
-	}
-	// 入场 100、止损 95：出场 110 为 +2R，95 为 -1R，90 为 -2R。
-	win := closeAt(id(a), 110, true)
-	loss := closeAt(id(a), 95, true)
-	// 旧版本与新版本的交易合并到同一策略。
-	call(t, s, "POST", fmt.Sprintf("/api/strategies/%d/versions", id(a)), `{"rules":"新规则"}`, 201)
-	win2 := closeAt(id(a), 105, true)
-	bad := closeAt(id(b), 90, false)
-	edge := closeAt(id(b), 110, true)
-	prev := closeAt(id(b), 110, true)
-	newTrade(t, s, id(a)) // 持仓中，不计入。
-	call(t, s, "PATCH", fmt.Sprintf("/api/strategies/%d", id(b)), `{"archived":true}`, 200)
-
-	d, err := st.Export()
-	if err != nil {
-		t.Fatal(err)
-	}
-	from, to := time.Date(2026, 10, 31, 16, 0, 0, 0, time.UTC), time.Date(2026, 11, 30, 16, 0, 0, 0, time.UTC)
-	at := map[int64]time.Time{win: from, loss: from.Add(time.Hour), win2: from.Add(2 * time.Hour), bad: from.Add(3 * time.Hour), edge: to, prev: from.Add(-time.Second)}
-	for i := range d.Trades {
-		if c, ok := at[d.Trades[i].ID]; ok {
-			d.Trades[i].OpenedAt = c.Add(-time.Minute)
-			d.Trades[i].ClosedAt = &c
-		}
-	}
-	if err = st.Import(d); err != nil {
-		t.Fatal(err)
-	}
-	// 用带偏移的时间传入，等价于东八区的 11 月。
-	m := call(t, s, "GET", "/api/monthly?from=2026-11-01T00:00:00%2B08:00&to=2026-12-01T00:00:00%2B08:00", "", 200)
-	if number(m, "n") != 4 || number(m, "total_r") != 0 || number(m, "win_rate") != 0.5 || number(m, "avg_win") != 1.5 || number(m, "avg_loss") != -1.5 ||
-		number(m, "max_drawdown_r") != 2 || number(m, "max_loss_streak") != 1 || number(m, "followed_rate") != 0.75 || number(m, "violated_n") != 1 || number(m, "violated_r") != -2 {
-		t.Fatal(m)
-	}
-	rows := items(m, "strategies")
-	if len(rows) != 2 {
-		t.Fatal(rows)
-	}
-	first, second := rows[0].(map[string]any), rows[1].(map[string]any)
-	if first["name"] != "趋势" || number(first, "n") != 3 || number(first, "total_r") != 2 || first["archived"] != false ||
-		second["name"] != "反转" || number(second, "n") != 1 || number(second, "total_r") != -2 || second["archived"] != true {
-		t.Fatal(rows)
-	}
-	empty := call(t, s, "GET", "/api/monthly?from=2020-01-01T00:00:00Z&to=2020-02-01T00:00:00Z", "", 200)
-	if number(empty, "n") != 0 || empty["followed_rate"] != nil || len(items(empty, "strategies")) != 0 {
-		t.Fatal(empty)
-	}
-	for _, q := range []string{"", "?from=2026-11-01T00:00:00Z", "?from=x&to=y", "?from=2026-12-01T00:00:00Z&to=2026-11-01T00:00:00Z"} {
-		call(t, s, "GET", "/api/monthly"+q, "", 400)
-	}
-}
-
-func TestPhaseSplitAndReadonly(t *testing.T) {
-	_, s := setup(t)
-	a := newStrategy(t, s)
-	call(t, s, "POST", "/api/trades", fmt.Sprintf(`{"strategy_id":%d,"symbol":"btc","side":"long","entry":100,"stop":95,"equity":10000,"risk_pct":1,"entry_reason":"突破"}`, id(a)), 400)
-	call(t, s, "POST", "/api/trades", fmt.Sprintf(`{"strategy_id":%d,"symbol":"btc","side":"long","entry":100,"stop":95,"equity":10000,"risk_pct":1,"entry_reason":"突破","phase":"top"}`, id(a)), 400)
-	early := newTrade(t, s, id(a))
-	late := call(t, s, "POST", "/api/trades", fmt.Sprintf(`{"strategy_id":%d,"symbol":"eth","side":"long","entry":100,"stop":95,"equity":10000,"risk_pct":1,"entry_reason":"末端追","phase":"late"}`, id(a)), 201)
-	newTrade(t, s, id(a))
-	call(t, s, "POST", fmt.Sprintf("/api/trades/%d/close", id(early)), `{"exit":110,"exit_reason":"target","followed_rules":true,"high":112,"low":99}`, 200)
-	call(t, s, "POST", fmt.Sprintf("/api/trades/%d/close", id(late)), `{"exit":95,"exit_reason":"stop","followed_rules":true}`, 200)
-	// 补丁不接受阶段字段，开仓后阶段只读。
-	call(t, s, "PATCH", fmt.Sprintf("/api/trades/%d", id(late)), `{"phase":"early"}`, 400)
-	result := call(t, s, "GET", fmt.Sprintf("/api/versions/%d/stats", int64(number(early, "version_id"))), "", 200)
-	phases := items(result, "phases")
-	if len(phases) != 4 {
-		t.Fatal(phases)
-	}
-	want := []struct {
-		phase string
-		n     float64
-		e     float64
-		q     float64
-	}{{"early", 1, 2, 1}, {"mid", 0, 0, 0}, {"late", 1, -1, 0}, {"unsure", 0, 0, 0}}
-	for i, w := range want {
-		p := phases[i].(map[string]any)
-		if p["phase"] != w.phase || number(p, "n") != w.n || number(p, "expectancy") != w.e || number(p, "quality_n") != w.q {
-			t.Fatalf("%d：%v", i, p)
-		}
-	}
-	if items(result, "trades")[0].(map[string]any)["phase"] == nil {
-		t.Fatal("交易缺少阶段")
-	}
-}
-
 func TestEquityAPI(t *testing.T) {
 	_, s := setup(t)
 	const path = "/api/equity/calibrations"
@@ -515,11 +517,11 @@ func TestEquityAPI(t *testing.T) {
 	if first["reason"] != "initial" || first["delta"] != nil {
 		t.Fatal(first)
 	}
-	tr := newTrade(t, s, id(newStrategy(t, s)))
+	tr := newTrade(t, s, nil)
 	if o := call(t, s, "GET", "/api/overview", "", 200); number(o, "equity") != 10000 {
 		t.Fatal(o["equity"])
 	}
-	call(t, s, "POST", fmt.Sprintf("/api/trades/%d/close", id(tr)), `{"exit":110,"exit_reason":"target","followed_rules":true}`, 200)
+	call(t, s, "POST", fmt.Sprintf("/api/trades/%d/close", id(tr)), `{"exit":110,"exit_reason":"target"}`, 200)
 	if o := call(t, s, "GET", "/api/overview", "", 200); number(o, "equity") != 10200 {
 		t.Fatal(o["equity"])
 	}
