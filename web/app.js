@@ -464,17 +464,19 @@ function svgNode(tag, attributes = {}, text) {
   return node;
 }
 function curve(values) {
-  const svg = svgNode("svg", { viewBox: "0 0 640 240", role: "img", "aria-label": "按平仓时间排序的累计 R 曲线" });
+  // 曲线占满整行：画布宽度接近实际显示宽度，文字不会被放大或缩得过小。
+  const W = Math.round(Math.max(420, Math.min(1000, window.innerWidth - 80))), right = W - 20;
+  const svg = svgNode("svg", { viewBox: `0 0 ${W} 240`, role: "img", "aria-label": "按平仓时间排序的累计 R 曲线" });
   const points = values.length ? values : [0];
   let low = 0, high = 0;
   for (const value of points) { low = Math.min(low, value); high = Math.max(high, value); }
   if (low === high) { low = -1; high = 1; }
   const padding = (high - low) * 0.12;
   low -= padding; high += padding;
-  const x = i => 54 + i / Math.max(1, points.length - 1) * 566;
+  const x = i => 54 + i / Math.max(1, points.length - 1) * (right - 54);
   const y = value => 18 + (high - value) / (high - low) * 186;
   for (const value of [low, 0, high]) {
-    svg.append(svgNode("line", { x1: 54, x2: 620, y1: y(value), y2: y(value), class: value === 0 ? "chart-zero" : "chart-grid" }));
+    svg.append(svgNode("line", { x1: 54, x2: right, y1: y(value), y2: y(value), class: value === 0 ? "chart-zero" : "chart-grid" }));
     svg.append(svgNode("text", { x: 47, y: y(value) + 4, "text-anchor": "end", class: "chart-label" }, rfmt(value)));
   }
   for (const i of [...new Set([0, Math.floor((points.length - 1) / 2), points.length - 1])]) {
@@ -509,15 +511,23 @@ function groupRows(title, groups, nameOf) {
   }
   return rows;
 }
+function guideGrid(def) {
+  return el("div", "guide", ...def.guide.map((g, i) => el("div", `guide-card${g.tone === "warn" ? " warn" : ""}`,
+    el("div", "guide-h", el("span", "guide-n", g.tone === "warn" ? "!" : String(i + 1 - def.guide.slice(0, i).filter(x => x.tone === "warn").length)), el("b", "", g.title)),
+    el("ul", "", ...g.points.map(p => el("li", "", p))))));
+}
+function guideBlock(def, v) {
+  return el("div", "panel guide-panel", guideGrid(def),
+    el("div", "guide-foot sub", `${killText(v).join(" · ")} · 创建于 ${date(v.created_at)}`),
+    el("details", "raw", el("summary", "", "规则原文"), el("pre", "", v.rules)));
+}
 function checklistPanel(def) {
-  const panel = el("div", "panel rules", el("h2", "section-title", "开仓清单"));
-  let sectionName = "";
-  for (const it of def.items) {
-    if (it.section !== sectionName) { sectionName = it.section; panel.append(el("div", "ck-sec", sectionName)); }
-    panel.append(el("div", "ck-line", it.kind === "attention" ? el("span", "tag t-warn", "注意") : el("span", "tag t-idle", "规则"), " ", it.setup ? `［${setupName(it.setup)}］` : "", it.label));
-  }
-  panel.append(el("div", "ck-sec", "平仓偏差（发生即违规）"), ...def.deviations.map(d => el("div", "ck-line", d.label)));
-  return panel;
+  const cards = sectionsOf(def.items).map(g => el("div", "ck-card",
+    el("div", "ck-card-h", el("b", "", g.name), g.setup ? el("span", "tag t-idle", setupName(g.setup)) : null),
+    ...g.items.map(it => el("div", `ck-row${it.kind === "attention" ? " ck-attn" : ""}`, el("span", `ck-dot ${it.kind}`), el("span", "ck-text", it.label), it.kind === "attention" ? el("span", "tag t-warn", "注意") : null))));
+  cards.push(el("div", "ck-card dev", el("div", "ck-card-h", el("b", "", "平仓偏差"), el("span", "tag t-neg", "发生即违规")),
+    ...def.deviations.map(d => el("div", "ck-row", el("span", "ck-dot dev"), el("span", "ck-text", d.label)))));
+  return el("div", "panel ck-panel", el("div", "ck-legend sub", el("span", "", el("span", "ck-dot rule"), "规则项：没满足记为违规开仓"), el("span", "", el("span", "ck-dot attention"), "注意项：只记录，不算违规")), el("div", "ck-grid", ...cards));
 }
 function renderDetail(strategy, detail) {
   const v = detail.version, def = detail.definition, report = detail.report, stats = report.edge, s = stats.summary;
@@ -536,7 +546,6 @@ function renderDetail(strategy, detail) {
     ["平均盈利", ...signed(s.n && s.win_rate > 0 ? s.avg_win : null)], ["平均亏损", ...signed(s.n && s.win_rate < 1 ? s.avg_loss : null)], ["最大回撤", ddfmt(s.max_drawdown_r)], ["最长连亏", `${s.max_loss_streak} 笔`],
     ["R 标准差", fmt(s.std_dev)], ["95% 区间下限", ...signed(s.ci_ok ? s.ci_low : null)], ["95% 区间上限", ...signed(s.ci_ok ? s.ci_high : null)], ["版本", `v${v.no}`]]
     .forEach(([label, value, cls]) => cards.append(el("div", "stat", el("small", "", label), el("b", `num ${cls || ""}`, value))));
-  const rules = el("div", "panel rules", el("h2", "section-title", "规则与停用条件"), el("pre", "", v.rules), ...killText(v).map(text => el("div", "sub", text)), el("div", "sub", `创建于 ${date(v.created_at)}`));
   const checks = el("div", "checks",
     checkCard("多空分开", [[`做多 ${stats.sides.long_n} 笔`, rnum(stats.sides.long_n ? stats.sides.long_e : null)], [`做空 ${stats.sides.short_n} 笔`, rnum(stats.sides.short_n ? stats.sides.short_e : null)]], stats.sides.warn ? "收益可能来自单边行情" : "两边各至少 10 笔时检查单边收益。", stats.sides.warn),
     checkCard("去掉最好的 5 笔", [["原期望", rnum(s.n ? s.expectancy : null)], [`剩余 ${Math.max(0, s.n - 5)} 笔`, rnum(stats.top_removed.computed ? stats.top_removed.e : null)]], !stats.top_removed.computed ? "超过 5 笔后计算。" : stats.top_removed.warn ? "收益集中在少数几笔" : "未触发收益集中警示。", stats.top_removed.warn),
@@ -572,7 +581,7 @@ function renderDetail(strategy, detail) {
   }
   const thinNote = el("span", "sub", `按规则单 · 不足 ${overview.settings.min_sample} 笔的分组变淡，仅供参考`);
   $("view").replaceChildren(link("‹ 首页", "#home", "back"), el("div", "d-head", el("div", "", el("h1", "", strategy.strategy.name, num(`v${v.no}`), verdict(stats)), el("div", "sub", readonly ? "历史版本只读 · 单独统计" : "当前版本 · 优势只统计按规则执行的单子"))), versions,
-    cards, el("div", "grid2", curve(s.curve), rules), checklistPanel(def), section("执行情况", executionBlock(report), el("span", "sub", "包含违规单")),
+    cards, curve(s.curve), section("规则", guideBlock(def, v), el("span", "sub", "按主题整理 · 原文可展开")), section("开仓清单", checklistPanel(def)), section("执行情况", executionBlock(report), el("span", "sub", "包含违规单")),
     section("按违规项", violations, el("span", "sub", "全部已平仓 · 按代价排序")),
     section("按 Setup", groupRows("Setup", report.setups, setupName), thinNote),
     section("按趋势阶段", groupRows("阶段", report.phases, phaseName), thinNote.cloneNode(true)),
@@ -587,47 +596,63 @@ function saved(message) {
   notice(message);
   void route({ quiet: true });
 }
-// 开仓清单：Vegas 方向、Setup 与对应条目、出场计划。返回取值和未满足规则项的函数。
+// 按 section 把相邻条目分组；同组条目都属于同一 Setup 时记下该 Setup。
+function sectionsOf(items) {
+  const groups = [];
+  for (const it of items) {
+    const last = groups[groups.length - 1];
+    if (last && last.name === it.section) last.items.push(it);
+    else groups.push({ name: it.section, items: [it] });
+  }
+  for (const g of groups) g.setup = g.items.every(it => it.setup && it.setup === g.items[0].setup) ? g.items[0].setup : "";
+  return groups;
+}
+// 开仓清单：Vegas 方向、Setup、按环节分组的条目、出场计划，各部分分别放进弹窗的不同步骤。
 function checklistForm(def, side) {
-  const node = el("div", "ck");
-  const vegas = segPicker("1H Vegas 方向", [["long", "多", "向上"], ["short", "空", "向下"]], side());
+  const vegas = segPicker("1H Vegas 方向", [["long", "多", "Vegas 向上"], ["short", "空", "Vegas 向下"]], side());
   let vegasTouched = false;
   vegas.node.addEventListener("change", () => { vegasTouched = true; });
   const setup = segPicker("Setup（必选）", SETUPS);
+  const plan = segPicker("选一种（必选）", EXIT_PLANS);
   const boxes = {};
-  const groups = [];
-  let current = null;
-  for (const it of def.items) {
-    if (!current || current.name !== it.section) { current = { name: it.section, node: el("div", "ck-group", el("div", "ck-sec", it.section)), items: [] }; groups.push(current); }
-    const box = checkbox("", false);
-    box.node.className = `chk ck-item${it.kind === "attention" ? " ck-attn" : ""}`;
-    if (it.kind === "attention") box.node.append(el("span", "tag t-warn", "注意"));
-    box.node.append(el("span", "", it.label));
-    boxes[it.key] = { ...box, item: it };
-    current.node.append(box.node);
-    current.items.push(it);
-  }
-  const hint = el("div", "sub", "选择 Setup 后显示对应条目。");
-  node.append(vegas.node, setup.node, hint, ...groups.map(g => g.node));
-  const plan = segPicker("出场计划（必选）", EXIT_PLANS);
-  node.append(plan.node);
+  const groups = sectionsOf(def.items).map(g => {
+    const node = el("div", "ck-card", el("div", "ck-card-h", el("b", "", g.name), g.setup ? el("span", "tag t-idle", setupName(g.setup)) : null));
+    for (const it of g.items) {
+      const box = checkbox("", false);
+      box.node.className = `chk ck-item${it.kind === "attention" ? " ck-attn" : ""}`;
+      box.node.append(el("span", "ck-text", it.label));
+      if (it.kind === "attention") box.node.append(el("span", "tag t-warn", "注意"));
+      boxes[it.key] = { ...box, item: it };
+      node.append(box.node);
+    }
+    return { ...g, node };
+  });
+  const hint = el("div", "sub ck-hint", "先在上一步选择 Setup，这里会显示对应条目。");
+  const itemsNode = el("div", "ck-grid", ...groups.map(g => g.node));
   const applies = it => !it.setup || it.setup === setup.value();
+  const shown = () => Object.values(boxes).filter(b => applies(b.item) && b.item.kind === "rule");
   function refresh() {
     if (!vegasTouched) vegas.set(side());
     hint.hidden = Boolean(setup.value());
     for (const g of groups) {
-      let shown = 0;
-      for (const it of g.items) { const on = applies(it); boxes[it.key].node.hidden = !on; shown += on; }
-      g.node.hidden = !shown;
+      let visible = 0;
+      for (const it of g.items) { const on = applies(it); boxes[it.key].node.hidden = !on; visible += on; }
+      g.node.hidden = !visible;
     }
+    for (const b of Object.values(boxes)) b.node.classList.toggle("on", b.input.checked);
   }
   return {
-    node, plan, refresh,
+    vegasNode: vegas.node, setupNode: setup.node, planNode: plan.node, itemsNode: el("div", "ck", hint, itemsNode),
+    plan, refresh,
     setup: () => setup.value(),
     // 只提交当前 Setup 适用的条目，切换 Setup 后残留的勾选不会被发送。
     value: () => ({ vegas_dir: vegas.value(), checks: Object.fromEntries(Object.values(boxes).filter(b => applies(b.item)).map(b => [b.item.key, b.input.checked])) }),
-    unmet: () => [...(vegas.value() && vegas.value() !== side() ? ["与 1H Vegas 方向相反"] : []), ...Object.values(boxes).filter(b => b.item.kind === "rule" && applies(b.item) && !b.input.checked).map(b => b.item.label)]
+    progress: () => { const list = shown(); return [list.filter(b => b.input.checked).length, list.length]; },
+    unmet: () => [...(vegas.value() && vegas.value() !== side() ? ["与 1H Vegas 方向相反"] : []), ...shown().filter(b => !b.input.checked).map(b => b.item.label)]
   };
+}
+function step(n, title, ...children) {
+  return el("section", "step", el("div", "step-h", el("span", "step-n", n), el("h3", "", title)), el("div", "step-b", ...children));
 }
 // 开仓时记录的清单，只读展示。
 function checklistSummary(trade, def) {
@@ -706,42 +731,43 @@ function tradeModal(mode, trade = {}, readonly = false, def = overview.definitio
   };
   const grid = el("div", "fgrid");
   if (opening) {
-    m.body.append(el("details", "rulebox", el("summary", "", `${overview.strategy.name} · v${overview.version.no}（点开查看规则原文）`), el("pre", "", overview.version.rules)));
+    m.form.classList.add("sheet-wide");
+    m.body.append(el("details", "rule-peek", el("summary", "", `${overview.strategy.name} · v${overview.version.no} · 下单前再看一遍规则`), guideGrid(def)));
   } else {
     m.body.append(el("div", "sub num", `开仓 ${date(trade.opened_at)}${trade.closed_at ? ` · 平仓 ${date(trade.closed_at)}` : ""}`));
     if (!closing) m.body.append(checklistSummary(trade, def));
-  }
-  if (!closing) {
-    f.side = selectField("方向", [["long", "做多"], ["short", "做空"]], trade.side || "long");
-    grid.append(f.side.node, addField("symbol", "品种", trade.symbol, "text"),
-      addField("entry", "入场价", trade.entry), addField("stop", "止损价", trade.stop));
-    if (opening) grid.append(addField("key_level", keyLevelLabel("long"), "", "decimal", true));
-    grid.append(addField("equity", "账户权益（U）", opening ? openingEquity() : trade.equity),
-      addField("risk_pct", "单笔风险（%）", opening ? overview.settings.risk_pct : trade.risk_pct));
-    m.body.append(grid);
-    if (opening && overview.equity != null && overview.equity <= 0) m.body.append(el("div", "err", "推算权益已不大于 0，请先校准，或在这里手动填写。"));
-  } else {
-    m.body.append(el("div", "rulebox num", `${trade.side === "long" ? "做多" : "做空"} · ${setupName(trade.setup)} · ${phaseName(trade.phase)} · 入场 ${fmt(trade.entry, 8)} · 止损 ${fmt(trade.stop, 8)} · 数量 ${fmt(trade.qty, 8)} · 1R ${fmt(trade.qty * Math.abs(trade.entry - trade.stop))} U`));
-    if (trade.violations?.length) m.body.append(el("div", "warnbox", "开仓违规：", trade.violations.map(k => violationName(def, k)).join("；")));
   }
   const calc = el("div", "calc");
   const riskValue = el("b", "num", "—"), qtyValue = el("b", "num", "—"), nominalValue = el("b", "num", "—");
   const stopError = el("div", "err");
   stopError.hidden = true;
-  const unmet = el("div", "warnbox");
-  unmet.hidden = true;
+  const status = el("div", "sheet-status");
   if (!closing) {
+    f.side = selectField("方向", [["long", "做多"], ["short", "做空"]], trade.side || "long");
+    grid.append(f.side.node, addField("symbol", "品种", trade.symbol, "text"),
+      addField("entry", "入场价", trade.entry), addField("stop", "止损价", trade.stop));
+    if (opening) grid.append(addField("key_level", keyLevelLabel("long"), ""));
+    grid.append(addField("equity", "账户权益（U）", opening ? openingEquity() : trade.equity),
+      addField("risk_pct", "单笔风险（%）", opening ? overview.settings.risk_pct : trade.risk_pct),
+      addField("qty", opening ? "实际数量（留空用建议值）" : "实际数量", trade.qty));
     calc.append(...[["1R（实际数量）", riskValue], ["建议数量", qtyValue], ["名义价值", nominalValue]].map(([label, value]) => el("div", "", el("small", "", label), value)));
-    m.body.append(calc, stopError, addField("qty", opening ? "实际数量（留空使用建议值）" : "实际数量", trade.qty));
+    const equityWarn = opening && overview.equity != null && overview.equity <= 0 ? el("div", "err", "推算权益已不大于 0，请先校准，或在这里手动填写。") : null;
+    const note = addField("entry_reason", "备注（选填）", trade.entry_reason, "textarea", true);
     if (opening) {
       f.phase = phasePicker();
       f.checklist = checklistForm(def, () => f.side.input.value);
-      const target = addField("target", "目标价（选填）", "");
-      f.targetNode = target;
-      m.body.append(f.phase.node, f.checklist.node, target);
-    }
-    m.body.append(addField("entry_reason", "备注（选填）", trade.entry_reason, "textarea"));
-    if (opening) m.body.append(unmet);
+      f.targetNode = addField("target", "目标价（选填）", "");
+      m.body.append(
+        step(1, "交易与仓位", grid, equityWarn, calc, stopError),
+        step(2, "背景与 Setup", f.checklist.vegasNode, f.phase.node, f.checklist.setupNode),
+        step(3, "开仓清单", f.checklist.itemsNode),
+        step(4, "出场计划", f.checklist.planNode, f.targetNode),
+        step(5, "备注", note));
+      m.footer.prepend(status);
+    } else m.body.append(grid, calc, stopError, note);
+  } else {
+    m.body.append(el("div", "rulebox num", `${trade.side === "long" ? "做多" : "做空"} · ${setupName(trade.setup)} · ${phaseName(trade.phase)} · 入场 ${fmt(trade.entry, 8)} · 止损 ${fmt(trade.stop, 8)} · 数量 ${fmt(trade.qty, 8)} · 1R ${fmt(trade.qty * Math.abs(trade.entry - trade.stop))} U`));
+    if (trade.violations?.length) m.body.append(el("div", "warnbox", "开仓违规：", trade.violations.map(k => violationName(def, k)).join("；")));
   }
   const preview = el("div", "bigR num", "—");
   const verdictPreview = el("div", "sub");
@@ -782,13 +808,17 @@ function tradeModal(mode, trade = {}, readonly = false, def = overview.definitio
       nominalValue.textContent = valid && qty > 0 ? `${fmt(qty * entry)} U` : "—";
       if (opening) {
         f.qty.input.placeholder = valid ? fmt(suggestion, 8) : "自动计算";
-        f.key_level.node.querySelector("label").textContent = `${keyLevelLabel(side)}（必填，供复盘分析）`;
+        f.key_level.node.querySelector("label").textContent = `${keyLevelLabel(side)}（必填，供复盘）`;
         f.checklist.refresh();
         f.targetNode.hidden = f.checklist.plan.value() !== "measured_move";
-        // 违规也能保存，按钮文字提醒这笔会记为违规开仓。
+        // 违规也能保存，底栏和按钮文字提醒这笔会记为违规开仓。
         const missing = f.checklist.setup() ? f.checklist.unmet() : [];
-        unmet.hidden = !missing.length;
-        unmet.textContent = `未满足 ${missing.length} 项：${missing.join("；")}`;
+        const [done, total] = f.checklist.progress();
+        status.className = `sheet-status ${!f.checklist.setup() ? "" : missing.length ? "bad" : "good"}`;
+        status.replaceChildren(!f.checklist.setup() ? el("span", "", "选择 Setup 后开始勾选清单")
+          : missing.length ? el("span", "", el("b", "", `规则 ${done}/${total}`), ` · 未满足：${missing.join("；")}`)
+          : el("span", "", el("b", "", `规则 ${done}/${total}`), " · 全部满足"));
+        status.title = missing.join("；");
         if (m.form.dataset.busy !== "true") m.submit.textContent = missing.length ? "记为违规开仓" : "保存";
       }
     }

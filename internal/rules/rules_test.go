@@ -134,3 +134,19 @@ func TestValidateDefinition(t *testing.T) {
 		}
 	}
 }
+
+func TestGuide(t *testing.T) {
+	g := v1().Guide
+	if len(g) < 8 {
+		t.Fatalf("展示版分组太少：%d", len(g))
+	}
+	for _, sec := range g {
+		if sec.Title == "" || len(sec.Points) == 0 {
+			t.Fatalf("分组不完整：%+v", sec)
+		}
+	}
+	bad := Definition{Name: "x", Versions: []Version{{No: 1, Guide: []GuideSection{{Title: ""}}}}}
+	if bad.Validate() == nil {
+		t.Fatal("空标题的分组应报错")
+	}
+}

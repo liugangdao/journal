@@ -39,14 +39,22 @@ type Deviation struct {
 	Label string `json:"label"`
 }
 
+// GuideSection 是规则的分组展示，只用于页面排版，不写入数据库，也不参与版本一致性校验。
+type GuideSection struct {
+	Title  string   `json:"title"`
+	Tone   string   `json:"tone,omitempty"` // warn 表示需要空仓或警惕的情形
+	Points []string `json:"points"`
+}
+
 type Version struct {
-	No              int         `json:"no"`
-	Rules           string      `json:"rules"`
-	Items           []Item      `json:"items"`
-	Deviations      []Deviation `json:"deviations"`
-	KillRecentN     *int        `json:"kill_recent_n"`
-	KillRecentBelow *float64    `json:"kill_recent_below"`
-	KillMaxDDR      *float64    `json:"kill_max_dd_r"`
+	No              int            `json:"no"`
+	Rules           string         `json:"rules"`
+	Guide           []GuideSection `json:"guide"`
+	Items           []Item         `json:"items"`
+	Deviations      []Deviation    `json:"deviations"`
+	KillRecentN     *int           `json:"kill_recent_n"`
+	KillRecentBelow *float64       `json:"kill_recent_below"`
+	KillMaxDDR      *float64       `json:"kill_max_dd_r"`
 }
 
 type Definition struct {
@@ -78,6 +86,11 @@ func (d Definition) Validate() error {
 	for i, v := range d.Versions {
 		if v.No != i+1 {
 			return fmt.Errorf("策略版本号必须从 1 连续递增，第 %d 个是 %d", i+1, v.No)
+		}
+		for _, g := range v.Guide {
+			if strings.TrimSpace(g.Title) == "" || len(g.Points) == 0 {
+				return fmt.Errorf("版本 %d 的规则分组缺少标题或要点", v.No)
+			}
 		}
 		keys := map[string]bool{VegasDirKey: true}
 		for _, it := range v.Items {
