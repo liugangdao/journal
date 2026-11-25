@@ -1,7 +1,6 @@
 package store
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"math"
@@ -12,13 +11,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liugangdao/journal/internal/rules"
 	"github.com/liugangdao/journal/internal/stats"
 )
 
 func ptr[T any](v T) *T { return &v }
+func item(key string, kind rules.Kind, setup string) rules.Item {
+	return rules.Item{Key: key, Section: "背景", Label: key, Kind: kind, Setup: setup}
+}
+
+var testItems = []rules.Item{item("a", rules.Rule, ""), item("b", rules.Rule, rules.Breakout), item("c", rules.Rule, rules.Pullback), item("z", rules.Attention, "")}
+var testDevs = []rules.Deviation{{Key: "moved_stop", Label: "改止损"}, {Key: "early_exit", Label: "提前离场"}}
+var testDef = rules.Definition{Name: "测试策略", Versions: []rules.Version{{No: 1, Rules: "规则一", Items: testItems, Deviations: testDevs}}}
+var testDef2 = rules.Definition{Name: "测试策略", Versions: append(append([]rules.Version(nil), testDef.Versions...), rules.Version{No: 2, Rules: "规则二", Items: testItems, Deviations: testDevs})}
+
 func newStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "journal.db"))
+	s, err := Open(filepath.Join(t.TempDir(), "journal.db"), testDef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,14 +36,21 @@ func newStore(t *testing.T) *Store {
 }
 func strategy(t *testing.T, s *Store) (Strategy, Version) {
 	t.Helper()
-	a, v, err := s.CreateStrategy("趋势", VersionInput{Rules: "突破后入场"})
+	a, err := s.Strategy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := s.CurrentVersion()
 	if err != nil {
 		t.Fatal(err)
 	}
 	return a, v
 }
-func input(id int64) OpenInput {
-	return OpenInput{StrategyID: id, Symbol: " btc ", Side: stats.Long, Entry: 100, Stop: 95, Equity: 10000, RiskPct: 1, EntryReason: " 趋势突破 ", Phase: "mid"}
+
+// input 返回一笔全部规则项都满足的突破多单；参数保留旧调用形式，不再使用。
+func input(int64) OpenInput {
+	return OpenInput{Symbol: " btc ", Side: stats.Long, Entry: 100, Stop: 95, Equity: 10000, RiskPct: 1, EntryReason: " 趋势突破 ", Phase: "mid",
+		Setup: rules.Breakout, KeyLevel: 94, ExitPlan: "trail", Checklist: rules.Checklist{VegasDir: "long", Checks: map[string]bool{"a": true, "b": true}}}
 }
 func openTrade(t *testing.T, s *Store, id int64) Trade {
 	t.Helper()
@@ -66,68 +82,9 @@ func clone(d Dump) Dump {
 	return out
 }
 
-func TestStrategyVersions(t *testing.T) {
-	s := newStore(t)
-	a, v1 := strategy(t, s)
-	v2, err := s.CreateVersion(a.ID, VersionInput{Rules: "新规则", KillRecentN: ptr(30), KillRecentBelow: ptr(0.0), KillMaxDDR: ptr(10.0)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cur, err := s.CurrentVersion(a.ID)
-	if err != nil || v1.No != 1 || v2.No != 2 || cur.ID != v2.ID {
-		t.Fatalf("版本 %v %v %v %v", v1, v2, cur, err)
-	}
-	old, err := s.GetVersion(v1.ID)
-	if err != nil || !reflect.DeepEqual(old, v1) {
-		t.Fatalf("旧版本改变：%+v %v", old, err)
-	}
-	vs, err := s.ListVersions(a.ID)
-	if err != nil || len(vs) != 2 || vs[0].No != 1 {
-		t.Fatalf("版本列表 %v %v", vs, err)
-	}
-	_, err = s.UpdateStrategy(a.ID, ptr("新名称"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cur, _ = s.CurrentVersion(a.ID)
-	if cur.ID != v2.ID {
-		t.Fatal("改名创建了版本")
-	}
-}
-
-func TestDuplicateNameConflict(t *testing.T) {
-	s := newStore(t)
-	strategy(t, s)
-	_, _, err := s.CreateStrategy(" 趋势 ", VersionInput{})
-	if !errors.Is(err, ErrConflict) {
-		t.Fatal(err)
-	}
-	a, _, err := s.CreateStrategy("第二个", VersionInput{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = s.UpdateStrategy(a.ID, ptr("趋势"), nil)
-	if !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "名称已存在") {
-		t.Fatal(err)
-	}
-}
-
-func TestVersionRulesTrimmed(t *testing.T) {
-	s := newStore(t)
-	a, v1, err := s.CreateStrategy("留白", VersionInput{Rules: "  高二入场\n"})
-	if err != nil || v1.Rules != "高二入场" {
-		t.Fatalf("%q %v", v1.Rules, err)
-	}
-	v2, err := s.CreateVersion(a.ID, VersionInput{Rules: "\t新规则  "})
-	if err != nil || v2.Rules != "新规则" {
-		t.Fatalf("%q %v", v2.Rules, err)
-	}
-}
-
 func TestOpenTradeDefaults(t *testing.T) {
 	s := newStore(t)
-	a, _ := strategy(t, s)
-	v, _ := s.CreateVersion(a.ID, VersionInput{})
+	a, v := strategy(t, s)
 	in := input(a.ID)
 	in.Entry = 68420
 	in.Stop = 67550
@@ -153,20 +110,16 @@ func TestOpenTradeValidation(t *testing.T) {
 		{"多止损相等", func(in *OpenInput) { in.Stop = in.Entry }, false}, {"多止损过高", func(in *OpenInput) { in.Stop = 101 }, false},
 		{"空止损过低", func(in *OpenInput) { in.Side = stats.Short }, false}, {"空止损相等", func(in *OpenInput) { in.Side = stats.Short; in.Stop = in.Entry }, false},
 		{"零入场", func(in *OpenInput) { in.Entry = 0 }, false}, {"负入场", func(in *OpenInput) { in.Entry = -1 }, false}, {"零止损", func(in *OpenInput) { in.Stop = 0 }, false},
-		{"空理由", func(in *OpenInput) { in.EntryReason = " \t" }, false}, {"空品种", func(in *OpenInput) { in.Symbol = " " }, false}, {"未知方向", func(in *OpenInput) { in.Side = "other" }, false},
+		{"空品种", func(in *OpenInput) { in.Symbol = " " }, false}, {"未知方向", func(in *OpenInput) { in.Side = "other" }, false},
 		{"零权益", func(in *OpenInput) { in.Equity = 0 }, false}, {"零风险", func(in *OpenInput) { in.RiskPct = 0 }, false}, {"负数量", func(in *OpenInput) { in.Qty = -1 }, false},
 		{"非有限价格", func(in *OpenInput) { in.Entry = math.NaN() }, false}, {"无限数量", func(in *OpenInput) { in.Qty = math.Inf(1) }, false},
-		{"归档", func(in *OpenInput) {}, true},
+		{"无关键价位", func(in *OpenInput) { in.KeyLevel = 0 }, false}, {"未知出场计划", func(in *OpenInput) { in.ExitPlan = "x" }, false},
+		{"移动止损配目标价", func(in *OpenInput) { in.Target = ptr(120.0) }, false}, {"未选 Setup", func(in *OpenInput) { in.Setup = "" }, false},
+		{"不适用的清单项", func(in *OpenInput) { in.Checklist.Checks["c"] = true }, false}, {"无 Vegas 方向", func(in *OpenInput) { in.Checklist.VegasDir = "" }, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newStore(t)
 			a, _ := strategy(t, s)
-			if tc.archived {
-				_, err := s.UpdateStrategy(a.ID, nil, ptr(true))
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
 			in := input(a.ID)
 			tc.change(&in)
 			_, err := s.OpenTrade(in)
@@ -183,7 +136,7 @@ func TestCloseTwiceConflict(t *testing.T) {
 	s := newStore(t)
 	a, _ := strategy(t, s)
 	tr := openTrade(t, s, a.ID)
-	first, err := s.CloseTrade(tr.ID, CloseInput{Exit: 110, ExitReason: "target", FollowedRules: true})
+	first, err := s.CloseTrade(tr.ID, CloseInput{Exit: 110, ExitReason: "target"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +190,7 @@ func TestUpdateTradeRevalidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := dump(t, s)
-	for _, p := range []TradePatch{{Stop: ptr(100.0)}, {Stop: ptr(105.0)}, {Qty: ptr(0.0)}, {EntryReason: ptr(" ")}, {Exit: ptr(-1.0)}, {High: ptr(80.0), Low: ptr(90.0)}} {
+	for _, p := range []TradePatch{{Stop: ptr(100.0)}, {Stop: ptr(105.0)}, {Qty: ptr(0.0)}, {Symbol: ptr(" ")}, {Exit: ptr(-1.0)}, {High: ptr(80.0), Low: ptr(90.0)}} {
 		_, err = s.UpdateTrade(tr.ID, p)
 		invalid(t, err)
 		if !reflect.DeepEqual(before, dump(t, s)) {
@@ -247,13 +200,18 @@ func TestUpdateTradeRevalidates(t *testing.T) {
 }
 
 func TestTradeVersionImmutable(t *testing.T) {
-	s := newStore(t)
-	a, v1 := strategy(t, s)
-	tr := openTrade(t, s, a.ID)
-	_, err := s.CreateVersion(a.ID, VersionInput{Rules: "修改规则"})
+	path := filepath.Join(t.TempDir(), "journal.db")
+	s, err := Open(path, testDef)
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, v1 := strategy(t, s)
+	tr := openTrade(t, s, 0)
+	s.Close()
+	if s, err = Open(path, testDef2); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
 	tr, err = s.UpdateTrade(tr.ID, TradePatch{Symbol: ptr("eth")})
 	if err != nil || tr.VersionID != v1.ID || tr.Symbol != "ETH" {
 		t.Fatalf("版本或更新不正确：%+v %v", tr, err)
@@ -266,7 +224,7 @@ func TestUpdateTradeClearOptional(t *testing.T) {
 			s := newStore(t)
 			a, _ := strategy(t, s)
 			tr := openTrade(t, s, a.ID)
-			before, err := s.CloseTrade(tr.ID, CloseInput{Exit: 110, ExitReason: "target", FollowedRules: true, High: ptr(112.0), Low: ptr(97.0), Funding: ptr(2.0), ReviewNote: "复盘"})
+			before, err := s.CloseTrade(tr.ID, CloseInput{Exit: 110, ExitReason: "target", High: ptr(112.0), Low: ptr(97.0), Funding: ptr(2.0), ReviewNote: "复盘"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -337,7 +295,7 @@ func TestCloseValidation(t *testing.T) {
 	}
 }
 
-func TestSettingsAndVersionValidation(t *testing.T) {
+func TestSettingsValidation(t *testing.T) {
 	s := newStore(t)
 	st, err := s.GetSettings()
 	if err != nil || st != (Settings{RiskPct: 1, MinSample: 30}) {
@@ -349,29 +307,20 @@ func TestSettingsAndVersionValidation(t *testing.T) {
 	if err = s.PutSettings(Settings{2, 10}); err != nil {
 		t.Fatal(err)
 	}
-	for _, v := range []VersionInput{{KillRecentN: ptr(0), KillRecentBelow: ptr(0.0)}, {KillRecentN: ptr(2)}, {KillRecentBelow: ptr(0.0)}, {KillMaxDDR: ptr(-1.0)}, {KillMaxDDR: ptr(math.NaN())}} {
-		_, _, err := s.CreateStrategy("无效", v)
-		invalid(t, err)
-	}
-	_, _, err = s.CreateStrategy(" ", VersionInput{})
-	invalid(t, err)
 }
 
 func TestExportImportRoundTrip(t *testing.T) {
 	s := newStore(t)
 	a, _ := strategy(t, s)
 	tr := openTrade(t, s, a.ID)
-	_, err := s.CloseTrade(tr.ID, CloseInput{Exit: 110, ExitReason: "target", FollowedRules: true, High: ptr(112.0), Low: ptr(97.0), Funding: ptr(2.0)})
+	_, err := s.CloseTrade(tr.ID, CloseInput{Exit: 110, ExitReason: "target", High: ptr(112.0), Low: ptr(97.0), Funding: ptr(2.0), Deviations: []string{"early_exit"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.CreateVersion(a.ID, VersionInput{Rules: "第二版", KillMaxDDR: ptr(10.0)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	openTrade(t, s, a.ID)
-	_, err = s.UpdateStrategy(a.ID, nil, ptr(true))
-	if err != nil {
+	in := input(0)
+	in.ExitPlan = "measured_move"
+	in.Target = ptr(130.0)
+	if _, err = s.OpenTrade(in); err != nil {
 		t.Fatal(err)
 	}
 	d := dump(t, s)
@@ -379,12 +328,14 @@ func TestExportImportRoundTrip(t *testing.T) {
 	if err = other.Import(d); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(d, dump(t, other)) {
-		t.Fatal("导出导入不一致")
+	got := dump(t, other)
+	if !reflect.DeepEqual(d, got) {
+		t.Fatalf("导出导入不一致：\n%+v\n%+v", d, got)
 	}
-	a2, v2, err := other.CreateStrategy("导入后的策略", VersionInput{})
-	if err != nil || a2.ID <= a.ID || v2.ID <= d.Versions[len(d.Versions)-1].ID {
-		t.Fatalf("导入后的编号 %v %v %v", a2, v2, err)
+	b1, _ := json.Marshal(d)
+	b2, _ := json.Marshal(got)
+	if string(b1) != string(b2) {
+		t.Fatal("JSON 不一致")
 	}
 }
 
@@ -409,7 +360,7 @@ func TestImportValidationAtomic(t *testing.T) {
 	openTrade(t, s, a.ID)
 	before := dump(t, s)
 	for _, change := range []func(*Dump){
-		func(d *Dump) { d.SchemaVersion = 4 }, func(d *Dump) { d.Settings.MinSample = 1 }, func(d *Dump) { d.Strategies = append(d.Strategies, d.Strategies[0]) },
+		func(d *Dump) { d.SchemaVersion = 3 }, func(d *Dump) { d.Settings.MinSample = 1 }, func(d *Dump) { d.Strategies = append(d.Strategies, d.Strategies[0]) },
 		func(d *Dump) { d.Versions = append(d.Versions, d.Versions[0]) }, func(d *Dump) { d.Trades = append(d.Trades, d.Trades[0]) }, func(d *Dump) { d.Trades[0].Stop = 100 },
 		func(d *Dump) { d.Trades[0].Qty = 0 }, func(d *Dump) { d.Trades[0].Status = "closed" }, func(d *Dump) { d.Trades[0].Status = "unknown" }, func(d *Dump) { d.Trades[0].OpenedAt = time.Time{} },
 		func(d *Dump) { d.Trades[0].Exit = ptr(110.0) }, func(d *Dump) { d.Strategies[0].ID = 0 }, func(d *Dump) { d.Versions = nil },
@@ -425,7 +376,7 @@ func TestImportValidationAtomic(t *testing.T) {
 
 func TestPersistenceWALAndForeignKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "db.sqlite")
-	s, err := Open(path)
+	s, err := Open(path, testDef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,7 +397,7 @@ func TestPersistenceWALAndForeignKeys(t *testing.T) {
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = Open(path)
+	s, err = Open(path, testDef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,16 +425,7 @@ func TestListsDeleteAndNotFound(t *testing.T) {
 	if err = s.DeleteTrade(first.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
-	_, err = s.UpdateStrategy(a.ID, nil, ptr(true))
-	if err != nil {
-		t.Fatal(err)
-	}
-	active, _ := s.ListStrategies(false)
-	all, _ := s.ListStrategies(true)
-	if len(active) != 0 || len(all) != 1 {
-		t.Fatal("归档过滤错误")
-	}
-	for _, err := range []error{func() error { _, e := s.GetVersion(999); return e }(), func() error { _, e := s.CurrentVersion(999); return e }(), func() error { _, e := s.ListVersions(999); return e }(), func() error { _, e := s.CreateVersion(999, VersionInput{}); return e }(), func() error { _, e := s.UpdateTrade(999, TradePatch{}); return e }(), func() error { _, e := s.CloseTrade(999, CloseInput{}); return e }()} {
+	for _, err := range []error{func() error { _, e := s.GetVersion(999); return e }(), func() error { _, e := s.VersionDef(999); return e }(), func() error { _, e := s.UpdateTrade(999, TradePatch{}); return e }(), func() error { _, e := s.CloseTrade(999, CloseInput{}); return e }()} {
 		if !errors.Is(err, ErrNotFound) {
 			t.Fatalf("不存在映射 %v", err)
 		}
@@ -541,12 +483,12 @@ func TestImportUTCAndTimeOrdering(t *testing.T) {
 
 func TestConcurrentCloseAcrossConnections(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "journal.db")
-	first, err := Open(path)
+	first, err := Open(path, testDef)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
-	second, err := Open(path)
+	second, err := Open(path, testDef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -592,7 +534,7 @@ func TestTradePhase(t *testing.T) {
 		in := input(a.ID)
 		in.Phase = p
 		tr, err := s.OpenTrade(in)
-		if err != nil || tr.Phase == nil || *tr.Phase != p {
+		if err != nil || tr.Phase != p {
 			t.Fatalf("阶段 %s：%v %v", p, tr.Phase, err)
 		}
 	}
@@ -601,71 +543,11 @@ func TestTradePhase(t *testing.T) {
 	if _, err := s.UpdateTrade(tr.ID, TradePatch{Symbol: ptr("ETH")}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CloseTrade(tr.ID, CloseInput{Exit: 110, ExitReason: "target", FollowedRules: true}); err != nil {
+	if _, err := s.CloseTrade(tr.ID, CloseInput{Exit: 110, ExitReason: "target"}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := getTrade(s.db, tr.ID)
-	if err != nil || got.Phase == nil || *got.Phase != "mid" || got.Symbol != "ETH" {
+	if err != nil || got.Phase != "mid" || got.Symbol != "ETH" {
 		t.Fatalf("%+v %v", got, err)
 	}
-}
-
-func TestMigrateV1Database(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "old.db")
-	raw, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	opened := timestamp(now())
-	for _, q := range []string{schema,
-		"INSERT INTO strategies VALUES(1,'旧策略',0,'" + opened + "')",
-		"INSERT INTO strategy_versions(id,strategy_id,no,rules,created_at) VALUES(1,1,1,'','" + opened + "')",
-		"INSERT INTO trades(id,version_id,symbol,side,entry,stop,equity,risk_pct,qty,entry_reason,opened_at,status,review_note) VALUES(1,1,'BTC','long',100,95,10000,1,2,'旧理由','" + opened + "','open','')",
-	} {
-		if _, err := raw.Exec(q); err != nil {
-			t.Fatal(err)
-		}
-	}
-	raw.Close()
-	s, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	var version int
-	if err := s.db.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil || version != 3 {
-		t.Fatalf("版本 %d %v", version, err)
-	}
-	d := dump(t, s)
-	if len(d.Trades) != 1 || d.Trades[0].Phase != nil || d.SchemaVersion != 3 {
-		t.Fatalf("%+v", d)
-	}
-	// 迁移后再次打开不重复迁移。
-	s.Close()
-	if s, err = Open(path); err != nil {
-		t.Fatal(err)
-	}
-	tr := openTrade(t, s, 1)
-	if *tr.Phase != "mid" {
-		t.Fatal(tr.Phase)
-	}
-}
-
-func TestImportPhase(t *testing.T) {
-	s := newStore(t)
-	a, _ := strategy(t, s)
-	openTrade(t, s, a.ID)
-	d := dump(t, s)
-	old := clone(d)
-	old.SchemaVersion = 1
-	old.Trades[0].Phase = nil
-	if err := s.Import(old); err != nil {
-		t.Fatal(err)
-	}
-	if got := dump(t, s); got.Trades[0].Phase != nil {
-		t.Fatal(got.Trades[0].Phase)
-	}
-	bad := clone(d)
-	bad.Trades[0].Phase = ptr("peak")
-	invalid(t, s.Import(bad))
 }

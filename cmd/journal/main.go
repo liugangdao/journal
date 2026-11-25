@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/liugangdao/journal/internal/api"
+	"github.com/liugangdao/journal/internal/rules"
 	"github.com/liugangdao/journal/internal/store"
 	"github.com/liugangdao/journal/web"
 )
@@ -27,7 +28,7 @@ func run() error {
 	if token == "" {
 		return errors.New("未设置 JOURNAL_TOKEN，拒绝启动")
 	}
-	st, err := store.Open(envOr("JOURNAL_DB", "./journal.db"))
+	st, err := store.Open(envOr("JOURNAL_DB", "./journal.db"), rules.Current)
 	if err != nil {
 		return err
 	}

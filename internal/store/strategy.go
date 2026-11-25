@@ -2,14 +2,16 @@ package store
 
 import (
 	"database/sql"
-	"strings"
+	"errors"
+	"fmt"
 	"time"
+
+	"github.com/liugangdao/journal/internal/rules"
 )
 
 type Strategy struct {
 	ID        int64     `json:"id"`
 	Name      string    `json:"name"`
-	Archived  bool      `json:"archived"`
 	CreatedAt time.Time `json:"created_at"`
 }
 type VersionInput struct {
@@ -26,44 +28,25 @@ type Version struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-func validateVersion(v VersionInput) error {
-	if (v.KillRecentN == nil) != (v.KillRecentBelow == nil) {
-		return invalidError("最近笔数和均值阈值必须一起填写")
-	}
-	if v.KillRecentN != nil && *v.KillRecentN <= 0 {
-		return invalidError("最近笔数必须大于 0")
-	}
-	if v.KillRecentBelow != nil && !finite(*v.KillRecentBelow) {
-		return invalidError("均值阈值必须是有限数字")
-	}
-	if v.KillMaxDDR != nil && !positive(*v.KillMaxDDR) {
-		return invalidError("最大回撤阈值必须大于 0")
-	}
-	return nil
-}
-
 type scanner interface{ Scan(...any) error }
 
 func scanStrategy(row scanner) (Strategy, error) {
 	var v Strategy
 	var created string
-	err := row.Scan(&v.ID, &v.Name, &v.Archived, &created)
+	err := row.Scan(&v.ID, &v.Name, &created)
 	if err != nil {
 		return v, dbError(err)
 	}
 	v.CreatedAt, err = parseTime(created)
 	return v, err
 }
-func getStrategy(q querier, id int64) (Strategy, error) {
-	return scanStrategy(q.QueryRow("SELECT id,name,archived,created_at FROM strategies WHERE id=?", id))
+
+// 系统里只有一个策略，由 syncStrategy 在打开数据库时建立。
+func getStrategy(q querier) (Strategy, error) {
+	return scanStrategy(q.QueryRow("SELECT id,name,created_at FROM strategies ORDER BY id LIMIT 1"))
 }
-func listStrategies(q querier, includeArchived bool) ([]Strategy, error) {
-	query := "SELECT id,name,archived,created_at FROM strategies"
-	if !includeArchived {
-		query += " WHERE archived=0"
-	}
-	query += " ORDER BY id"
-	rows, err := q.Query(query)
+func listStrategies(q querier) ([]Strategy, error) {
+	rows, err := q.Query("SELECT id,name,created_at FROM strategies ORDER BY id")
 	if err != nil {
 		return nil, dbError(err)
 	}
@@ -78,9 +61,7 @@ func listStrategies(q querier, includeArchived bool) ([]Strategy, error) {
 	}
 	return vs, dbError(rows.Err())
 }
-func (s *Store) ListStrategies(includeArchived bool) ([]Strategy, error) {
-	return listStrategies(s.db, includeArchived)
-}
+func (s *Store) Strategy() (Strategy, error) { return getStrategy(s.db) }
 
 const versionColumns = "id,strategy_id,no,rules,kill_recent_n,kill_recent_below,kill_max_dd_r,created_at"
 
@@ -94,25 +75,17 @@ func scanVersion(row scanner) (Version, error) {
 	v.CreatedAt, err = parseTime(created)
 	return v, err
 }
-func currentVersion(q querier, id int64) (Version, error) {
-	return scanVersion(q.QueryRow("SELECT "+versionColumns+" FROM strategy_versions WHERE strategy_id=? ORDER BY no DESC LIMIT 1", id))
+func currentVersion(q querier) (Version, error) {
+	return scanVersion(q.QueryRow("SELECT " + versionColumns + " FROM strategy_versions ORDER BY no DESC LIMIT 1"))
 }
-func (s *Store) CurrentVersion(strategyID int64) (Version, error) {
-	return currentVersion(s.db, strategyID)
+func (s *Store) CurrentVersion() (Version, error) { return currentVersion(s.db) }
+func getVersion(q querier, id int64) (Version, error) {
+	return scanVersion(q.QueryRow("SELECT "+versionColumns+" FROM strategy_versions WHERE id=?", id))
 }
-func (s *Store) GetVersion(id int64) (Version, error) {
-	return scanVersion(s.db.QueryRow("SELECT "+versionColumns+" FROM strategy_versions WHERE id=?", id))
-}
+func (s *Store) GetVersion(id int64) (Version, error) { return getVersion(s.db, id) }
 
-func listVersions(q querier, strategyID *int64) ([]Version, error) {
-	query := "SELECT " + versionColumns + " FROM strategy_versions"
-	args := []any{}
-	if strategyID != nil {
-		query += " WHERE strategy_id=?"
-		args = append(args, *strategyID)
-	}
-	query += " ORDER BY strategy_id,no,id"
-	rows, err := q.Query(query, args...)
+func listVersions(q querier) ([]Version, error) {
+	rows, err := q.Query("SELECT " + versionColumns + " FROM strategy_versions ORDER BY no,id")
 	if err != nil {
 		return nil, dbError(err)
 	}
@@ -127,17 +100,22 @@ func listVersions(q querier, strategyID *int64) ([]Version, error) {
 	}
 	return vs, dbError(rows.Err())
 }
-func (s *Store) ListVersions(strategyID int64) ([]Version, error) {
-	var vs []Version
-	err := s.transaction(func(tx *sql.Tx) error {
-		if _, err := getStrategy(tx, strategyID); err != nil {
-			return err
-		}
-		var err error
-		vs, err = listVersions(tx, &strategyID)
-		return err
-	})
-	return vs, err
+func (s *Store) ListVersions() ([]Version, error) { return listVersions(s.db) }
+
+// VersionDef 返回交易所属版本在代码中的定义。
+func (s *Store) VersionDef(versionID int64) (rules.Version, error) {
+	v, err := getVersion(s.db, versionID)
+	if err != nil {
+		return rules.Version{}, err
+	}
+	return s.versionDef(v.No)
+}
+func (s *Store) versionDef(no int) (rules.Version, error) {
+	d, ok := s.def.Version(no)
+	if !ok {
+		return d, errors.New("代码中缺少策略版本定义")
+	}
+	return d, nil
 }
 
 func insertVersion(q querier, v Version) (Version, error) {
@@ -149,70 +127,58 @@ func insertVersion(q querier, v Version) (Version, error) {
 	return v, dbError(err)
 }
 
-func (s *Store) CreateStrategy(name string, v VersionInput) (Strategy, Version, error) {
-	a := Strategy{Name: strings.TrimSpace(name), CreatedAt: now()}
-	v.Rules = strings.TrimSpace(v.Rules)
-	var version Version
-	if a.Name == "" {
-		return a, version, invalidError("策略名称不能为空")
-	}
-	if err := validateVersion(v); err != nil {
-		return a, version, err
-	}
-	err := s.transaction(func(tx *sql.Tx) error {
-		result, err := tx.Exec("INSERT INTO strategies(name,archived,created_at) VALUES(?,0,?)", a.Name, timestamp(a.CreatedAt))
-		if err != nil {
-			return err
-		}
-		a.ID, err = result.LastInsertId()
-		if err != nil {
-			return err
-		}
-		version, err = insertVersion(tx, Version{StrategyID: a.ID, No: 1, VersionInput: v, CreatedAt: a.CreatedAt})
-		return err
-	})
-	return a, version, nameConflict(err)
+func inputOf(d rules.Version) VersionInput {
+	return VersionInput{Rules: d.Rules, KillRecentN: d.KillRecentN, KillRecentBelow: d.KillRecentBelow, KillMaxDDR: d.KillMaxDDR}
+}
+func equalPtr[T comparable](a, b *T) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
+func sameVersion(a, b VersionInput) bool {
+	return a.Rules == b.Rules && equalPtr(a.KillRecentN, b.KillRecentN) && equalPtr(a.KillRecentBelow, b.KillRecentBelow) && equalPtr(a.KillMaxDDR, b.KillMaxDDR)
 }
 
-func (s *Store) UpdateStrategy(id int64, name *string, archived *bool) (Strategy, error) {
-	var a Strategy
-	err := s.transaction(func(tx *sql.Tx) error {
-		var err error
-		a, err = getStrategy(tx, id)
-		if err != nil {
-			return err
+// checkVersionsAgainst 要求数据库中的版本是代码定义的前缀：版本号连续，内容与同号定义一致。
+func checkVersionsAgainst(def rules.Definition, vs []Version) error {
+	if len(vs) > len(def.Versions) {
+		return invalidError("数据库中的策略版本比程序新，请更新程序")
+	}
+	for i, v := range vs {
+		if v.No != i+1 {
+			return invalidError("数据库中的策略版本号不连续")
 		}
-		if name != nil {
-			a.Name = strings.TrimSpace(*name)
-			if a.Name == "" {
-				return invalidError("策略名称不能为空")
-			}
+		if !sameVersion(v.VersionInput, inputOf(def.Versions[i])) {
+			return invalidError(fmt.Sprintf("版本 %d 的规则与数据库不一致：已写入的版本不能修改，请在代码中追加新版本", v.No))
 		}
-		if archived != nil {
-			a.Archived = *archived
-		}
-		_, err = tx.Exec("UPDATE strategies SET name=?,archived=? WHERE id=?", a.Name, a.Archived, id)
-		return err
-	})
-	return a, nameConflict(err)
+	}
+	return nil
 }
 
-func (s *Store) CreateVersion(strategyID int64, v VersionInput) (Version, error) {
-	var out Version
-	v.Rules = strings.TrimSpace(v.Rules)
-	if err := validateVersion(v); err != nil {
-		return out, err
-	}
-	err := s.transaction(func(tx *sql.Tx) error {
-		if _, err := getStrategy(tx, strategyID); err != nil {
-			return err
-		}
-		cur, err := currentVersion(tx, strategyID)
+// syncStrategy 建立唯一策略，名称跟随代码，并按顺序补上代码中新增的版本。
+func syncStrategy(tx *sql.Tx, def rules.Definition) error {
+	a, err := getStrategy(tx)
+	if errors.Is(err, ErrNotFound) {
+		a = Strategy{Name: def.Name, CreatedAt: now()}
+		result, err := tx.Exec("INSERT INTO strategies(name,created_at) VALUES(?,?)", a.Name, timestamp(a.CreatedAt))
 		if err != nil {
 			return err
 		}
-		out, err = insertVersion(tx, Version{StrategyID: strategyID, No: cur.No + 1, VersionInput: v, CreatedAt: now()})
+		if a.ID, err = result.LastInsertId(); err != nil {
+			return err
+		}
+	} else if err != nil {
 		return err
-	})
-	return out, err
+	} else if _, err := tx.Exec("UPDATE strategies SET name=? WHERE id=?", def.Name, a.ID); err != nil {
+		return err
+	}
+	vs, err := listVersions(tx)
+	if err != nil {
+		return err
+	}
+	if err := checkVersionsAgainst(def, vs); err != nil {
+		return err
+	}
+	for _, d := range def.Versions[len(vs):] {
+		if _, err := insertVersion(tx, Version{StrategyID: a.ID, No: d.No, VersionInput: inputOf(d), CreatedAt: now()}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

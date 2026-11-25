@@ -2,34 +2,34 @@ package store
 
 import (
 	"database/sql"
-	"fmt"
-	"strings"
+	"sort"
+
+	"github.com/liugangdao/journal/internal/rules"
 )
 
 type Dump struct {
-	SchemaVersion int        `json:"schema_version"`
-	Settings      Settings   `json:"settings"`
-	Strategies    []Strategy `json:"strategies"`
-	Versions      []Version  `json:"versions"`
-	Trades        []Trade    `json:"trades"`
-	// 版本 1、2 的备份没有此字段，导入后账户权益回到未设置。
-	Calibrations []Calibration `json:"equity_calibrations"`
+	SchemaVersion int           `json:"schema_version"`
+	Settings      Settings      `json:"settings"`
+	Strategies    []Strategy    `json:"strategies"`
+	Versions      []Version     `json:"versions"`
+	Trades        []Trade       `json:"trades"`
+	Calibrations  []Calibration `json:"equity_calibrations"`
 }
 
 // Export 在同一事务内读取，避免导出期间写入造成跨表不一致。
 func (s *Store) Export() (Dump, error) {
-	d := Dump{SchemaVersion: 3}
+	d := Dump{SchemaVersion: schemaVersion}
 	err := s.transaction(func(tx *sql.Tx) error {
 		var err error
 		d.Settings, err = getSettings(tx)
 		if err != nil {
 			return err
 		}
-		d.Strategies, err = listStrategies(tx, true)
+		d.Strategies, err = listStrategies(tx)
 		if err != nil {
 			return err
 		}
-		d.Versions, err = listVersions(tx, nil)
+		d.Versions, err = listVersions(tx)
 		if err != nil {
 			return err
 		}
@@ -43,55 +43,43 @@ func (s *Store) Export() (Dump, error) {
 	return d, err
 }
 
-func validateDump(d *Dump) error {
-	// 版本 1 的备份没有趋势阶段，导入后视为未记录。
-	if d.SchemaVersion < 1 || d.SchemaVersion > 3 {
-		return invalidError("不支持此备份版本")
+// validateDump 只接受当前版本的备份，且备份中的策略版本必须与代码定义一致。
+func validateDump(d *Dump, def rules.Definition) error {
+	if d.SchemaVersion != schemaVersion {
+		return invalidError("只接受版本 4 的备份")
 	}
 	if err := validateSettings(d.Settings); err != nil {
 		return err
 	}
-	strategies := map[int64]bool{}
-	names := map[string]bool{}
-	versions := map[int64]bool{}
-	numbers := map[string]bool{}
-	counts := map[int64]int{}
-	trades := map[int64]bool{}
-	for i := range d.Strategies {
-		a := &d.Strategies[i]
-		a.Name = strings.TrimSpace(a.Name)
-		if a.ID <= 0 || strategies[a.ID] || a.Name == "" || names[a.Name] || a.CreatedAt.IsZero() {
-			return invalidError("备份策略编号、名称或创建时间不合法")
-		}
-		a.CreatedAt = a.CreatedAt.UTC()
-		strategies[a.ID] = true
-		names[a.Name] = true
+	if len(d.Strategies) != 1 {
+		return invalidError("备份必须恰好包含一个策略")
 	}
+	a := &d.Strategies[0]
+	if a.ID <= 0 || a.CreatedAt.IsZero() {
+		return invalidError("备份策略编号或创建时间不合法")
+	}
+	a.CreatedAt = a.CreatedAt.UTC()
+	versions := map[int64]int{}
 	for i := range d.Versions {
 		v := &d.Versions[i]
-		key := fmt.Sprintf("%d/%d", v.StrategyID, v.No)
-		if v.ID <= 0 || versions[v.ID] || !strategies[v.StrategyID] || v.No <= 0 || numbers[key] || v.CreatedAt.IsZero() {
+		if v.ID <= 0 || versions[v.ID] != 0 || v.StrategyID != a.ID || v.CreatedAt.IsZero() {
 			return invalidError("备份版本编号、策略引用或创建时间不合法")
 		}
-		if err := validateVersion(v.VersionInput); err != nil {
-			return err
-		}
 		v.CreatedAt = v.CreatedAt.UTC()
-		versions[v.ID] = true
-		numbers[key] = true
-		counts[v.StrategyID]++
+		versions[v.ID] = v.No
 	}
-	for id := range strategies {
-		if counts[id] == 0 {
-			return invalidError("每个策略必须至少有一个版本")
-		}
+	sort.Slice(d.Versions, func(i, j int) bool { return d.Versions[i].No < d.Versions[j].No })
+	if err := checkVersionsAgainst(def, d.Versions); err != nil {
+		return invalidError("备份中的策略版本与程序不一致")
 	}
+	trades := map[int64]bool{}
 	for i := range d.Trades {
 		t := &d.Trades[i]
-		if t.ID <= 0 || trades[t.ID] || !versions[t.VersionID] {
+		no, ok := versions[t.VersionID]
+		if t.ID <= 0 || trades[t.ID] || !ok {
 			return invalidError("备份交易编号或版本引用不合法")
 		}
-		if err := validateTrade(t); err != nil {
+		if err := validateTrade(t, def.Versions[no-1]); err != nil {
 			return err
 		}
 		trades[t.ID] = true
@@ -105,7 +93,7 @@ func (s *Store) Import(d Dump) error {
 	d.Versions = append([]Version(nil), d.Versions...)
 	d.Trades = append([]Trade(nil), d.Trades...)
 	d.Calibrations = append([]Calibration(nil), d.Calibrations...)
-	if err := validateDump(&d); err != nil {
+	if err := validateDump(&d, s.def); err != nil {
 		return err
 	}
 	return s.transaction(func(tx *sql.Tx) error {
@@ -118,7 +106,7 @@ func (s *Store) Import(d Dump) error {
 			return err
 		}
 		for _, a := range d.Strategies {
-			if _, err := tx.Exec("INSERT INTO strategies(id,name,archived,created_at) VALUES(?,?,?,?)", a.ID, a.Name, a.Archived, timestamp(a.CreatedAt)); err != nil {
+			if _, err := tx.Exec("INSERT INTO strategies(id,name,created_at) VALUES(?,?,?)", a.ID, a.Name, timestamp(a.CreatedAt)); err != nil {
 				return err
 			}
 		}
@@ -137,6 +125,7 @@ func (s *Store) Import(d Dump) error {
 				return err
 			}
 		}
-		return nil
+		// 备份可能早于代码中新增的版本，导入后补上。
+		return syncStrategy(tx, s.def)
 	})
 }

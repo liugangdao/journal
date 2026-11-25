@@ -8,7 +8,7 @@ import (
 
 func closeAt(t *testing.T, s *Store, id int64, exit float64) Trade {
 	t.Helper()
-	tr, err := s.CloseTrade(id, CloseInput{Exit: exit, ExitReason: "manual", FollowedRules: true})
+	tr, err := s.CloseTrade(id, CloseInput{Exit: exit, ExitReason: "manual"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestCalibrationFlow(t *testing.T) {
 	// 持仓不计入，平仓后才计入，资金费从盈亏中扣除。
 	old := openTrade(t, s, a.ID)
 	wantEquity(t, s, 10000)
-	if _, err := s.CloseTrade(old.ID, CloseInput{Exit: 110, ExitReason: "target", FollowedRules: true, Funding: ptr(5.0)}); err != nil {
+	if _, err := s.CloseTrade(old.ID, CloseInput{Exit: 110, ExitReason: "target", Funding: ptr(5.0)}); err != nil {
 		t.Fatal(err)
 	}
 	afterWin := 10000 + 10*old.Qty - 5
@@ -107,7 +107,7 @@ func TestImportCalibrations(t *testing.T) {
 	calibrate(t, s, 10000, "")
 	calibrate(t, s, 9500, "fee")
 	d := dump(t, s)
-	if d.SchemaVersion != 3 || len(d.Calibrations) != 2 {
+	if d.SchemaVersion != 4 || len(d.Calibrations) != 2 {
 		t.Fatalf("%+v", d)
 	}
 
@@ -131,14 +131,13 @@ func TestImportCalibrations(t *testing.T) {
 	}
 	wantEquity(t, s, 9500)
 
-	// 旧版本备份没有校准记录，导入后回到未设置。
-	old := clone(d)
-	old.SchemaVersion = 2
-	old.Calibrations = nil
-	if err := s.Import(old); err != nil {
+	// 不含校准记录的备份导入后回到未设置。
+	none := clone(d)
+	none.Calibrations = nil
+	if err := s.Import(none); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, err := s.CurrentEquity(); ok || err != nil {
-		t.Fatalf("导入旧备份后 %v %v", ok, err)
+		t.Fatalf("导入无校准备份后 %v %v", ok, err)
 	}
 }
