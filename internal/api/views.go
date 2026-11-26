@@ -302,22 +302,30 @@ type monthlyView struct {
 	FollowedRate  *float64  `json:"followed_rate"`
 	ViolatedN     int       `json:"violated_n"`
 	ViolatedR     float64   `json:"violated_r"`
+	// Trades 列出本月的交易：已平仓的按平仓时间、持仓中的按开仓时间落在 [from, to) 内。
+	Trades []openTradeView `json:"trades"`
 }
 
 // monthly 统计平仓时间落在 [from, to) 内的交易，各版本合并。
 func (s snapshot) monthly(from, to time.Time) monthlyView {
 	all := []stats.ClosedTrade{}
+	listed := []openTradeView{}
+	in := func(at time.Time) bool { return !at.Before(from) && at.Before(to) }
 	for _, t := range s.dump.Trades {
-		if t.Status != "closed" || t.ClosedAt.Before(from) || !t.ClosedAt.Before(to) {
+		if t.Status == "open" && in(t.OpenedAt) {
+			listed = append(listed, openTradeView{tradeView: s.viewTrade(t), VersionNo: s.versions[t.VersionID].No, RiskAmount: t.Qty * math.Abs(t.Entry-t.Stop)})
+		}
+		if t.Status != "closed" || !in(*t.ClosedAt) {
 			continue
 		}
 		all = append(all, closedTrade(t))
+		listed = append(listed, openTradeView{tradeView: s.viewTrade(t), VersionNo: s.versions[t.VersionID].No, RiskAmount: t.Qty * math.Abs(t.Entry-t.Stop)})
 	}
 	// 月度样本太小，不输出置信区间与结论，只取描述性数字。
 	st := stats.Compute(all, stats.KillRule{}, 0)
 	m := monthlyView{From: from, To: to, N: st.Summary.N, WinRate: st.Summary.WinRate, AvgWin: st.Summary.AvgWin, AvgLoss: st.Summary.AvgLoss,
 		Expectancy: st.Summary.Expectancy, TotalR: st.Summary.TotalR, MaxDrawdownR: st.Summary.MaxDrawdownR, MaxLossStreak: st.Summary.MaxLossStreak,
-		ViolatedN: st.Rules.ViolatedN, ViolatedR: st.Rules.ViolatedR}
+		ViolatedN: st.Rules.ViolatedN, ViolatedR: st.Rules.ViolatedR, Trades: listed}
 	if m.N > 0 {
 		rate := float64(st.Rules.FollowedN) / float64(m.N)
 		m.FollowedRate = &rate

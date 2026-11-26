@@ -315,14 +315,19 @@ func TestMonthly(t *testing.T) {
 	bad := id(closed(t, s, nil, 90, `["early_exit"]`))
 	edge := id(closed(t, s, nil, 110, "[]"))
 	prev := id(closed(t, s, nil, 110, "[]"))
-	newTrade(t, s, nil) // 持仓中，不计入。
+	open := id(newTrade(t, s, nil))    // 本月开仓、仍持仓：不计入统计，但列在本月交易里。
+	oldOpen := id(newTrade(t, s, nil)) // 上月开仓、仍持仓：不属于本月。
 	d, err := st.Export()
 	if err != nil {
 		t.Fatal(err)
 	}
 	from, to := time.Date(2026, 10, 31, 16, 0, 0, 0, time.UTC), time.Date(2026, 11, 30, 16, 0, 0, 0, time.UTC)
 	at := map[int64]time.Time{win: from, loss: from.Add(time.Hour), win2: from.Add(2 * time.Hour), bad: from.Add(3 * time.Hour), edge: to, prev: from.Add(-time.Second)}
+	openedAt := map[int64]time.Time{open: from.Add(4 * time.Hour), oldOpen: from.Add(-time.Hour)}
 	for i := range d.Trades {
+		if o, ok := openedAt[d.Trades[i].ID]; ok {
+			d.Trades[i].OpenedAt = o
+		}
 		if c, ok := at[d.Trades[i].ID]; ok {
 			d.Trades[i].OpenedAt = c.Add(-time.Minute)
 			d.Trades[i].ClosedAt = &c
@@ -337,11 +342,22 @@ func TestMonthly(t *testing.T) {
 		number(m, "max_drawdown_r") != 2 || number(m, "max_loss_streak") != 1 || number(m, "followed_rate") != 0.75 || number(m, "violated_n") != 1 || number(m, "violated_r") != -2 {
 		t.Fatal(m)
 	}
+	listed := map[int64]map[string]any{}
+	for _, v := range m["trades"].([]any) {
+		tr := v.(map[string]any)
+		listed[id(tr)] = tr
+	}
+	if len(listed) != 5 || listed[open] == nil || listed[prev] != nil || listed[edge] != nil || listed[oldOpen] != nil {
+		t.Fatalf("本月交易应为 4 笔已平仓加 1 笔本月开仓的持仓：%v", m["trades"])
+	}
+	if number(listed[win], "r") != 2 || number(listed[win], "version_no") != 1 || len(listed[bad]["violations"].([]any)) != 1 || listed[open]["r"] != nil {
+		t.Fatal(listed)
+	}
 	if _, ok := m["strategies"]; ok {
 		t.Fatal("月度不应再按策略分组")
 	}
 	empty := call(t, s, "GET", "/api/monthly?from=2020-01-01T00:00:00Z&to=2020-02-01T00:00:00Z", "", 200)
-	if number(empty, "n") != 0 || empty["followed_rate"] != nil {
+	if number(empty, "n") != 0 || empty["followed_rate"] != nil || len(empty["trades"].([]any)) != 0 {
 		t.Fatal(empty)
 	}
 	for _, q := range []string{"", "?from=2026-11-01T00:00:00Z", "?from=x&to=y", "?from=2026-12-01T00:00:00Z&to=2026-11-01T00:00:00Z"} {

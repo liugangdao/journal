@@ -232,7 +232,6 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .verdict .sub{margin-top:4px;font-size:13px}
 .interval{min-width:0}
 .section-title{margin:0;font-size:18px}
-.month-row{grid-template-columns:minmax(0,2fr) 1fr 1fr}
 .history-row{grid-template-columns:.4fr 1.3fr 1.2fr .6fr}
 .history-row.on{background:var(--panel-2)}
 .phase-row{grid-template-columns:1fr .6fr .8fr .9fr .9fr minmax(0,1.6fr)}
@@ -272,14 +271,12 @@ button:disabled{opacity:.5;cursor:not-allowed}
   .nav{order:5;flex:0 0 100%}
   .history-row{grid-template-columns:1fr 1fr}
   .history-row>:last-child{grid-column:1/-1}
-  .month-row{grid-template-columns:minmax(0,1fr) auto}
   .phase-row{grid-template-columns:minmax(0,1fr) auto}
   .phase-row .hide-m{display:none}
   .phase-row .show-m{display:block}
   .phase-seg{grid-template-columns:repeat(2,minmax(0,1fr))}
   .phase-seg label:nth-child(3){border-left:0}
   .phase-seg label:nth-child(n+3){border-top:1px solid var(--line-2)}
-  .month-row .hide-m{display:none}
   .sec-h{flex-wrap:wrap}
   .checks{grid-template-columns:minmax(0,1fr)}
   .sheet input,.sheet select,.sheet textarea{font-size:18px}
@@ -426,6 +423,48 @@ details.rule-peek .guide-card{background:var(--panel)}
 .trade-row .side{margin-left:4px;vertical-align:1px}
 .t-r{text-align:right}
 .t-r b{font-size:17px;font-weight:600}
+
+/* 交易页：月份切换、月历与列表并排（宽屏时月历固定在左侧） */
+.mpick{display:flex;align-items:center;gap:8px}
+.mpick b{font-size:16px;font-weight:600;min-width:7.5em;text-align:center}
+.mnav{min-width:36px;text-align:center;text-decoration:none;color:var(--fg);font-size:18px;line-height:1.1;padding:5px 10px}
+.mnav[aria-disabled="true"]{opacity:.35;pointer-events:none}
+.tlayout{display:grid;grid-template-columns:minmax(360px,460px) minmax(0,1fr);gap:18px;align-items:start}
+.tside{position:sticky;top:76px;display:grid;gap:8px}
+.cal-note{margin:0 2px;font-size:13px;color:var(--faint)}
+.cal-box{padding:12px}
+.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px}
+.cal-w{text-align:center;font-size:12px;color:var(--faint);padding:2px 0 4px}
+.cal-d{--tint:var(--idle);--heat:0%;min-height:58px;min-width:0;border:1px solid transparent;border-radius:8px;padding:5px 6px;display:flex;flex-direction:column;align-items:stretch;justify-content:space-between;gap:2px;text-align:left;background:color-mix(in srgb,var(--tint) var(--heat),var(--panel-2));overflow:hidden}
+.cal-d:disabled{background:transparent;cursor:default;opacity:1}
+.cal-d:disabled .cal-n{color:var(--faint)}
+.cal-d.up{--tint:var(--pos)} .cal-d.down{--tint:var(--neg)} .cal-d.flat{--heat:0%}
+.cal-d:not(:disabled):hover{border-color:var(--faint)}
+.cal-d.today .cal-n{color:var(--accent-ink);background:var(--accent);border-radius:999px;padding:0 5px}
+.cal-d.on{border-color:var(--fg);box-shadow:0 0 0 1px var(--fg)}
+.cal-n{font-size:13px;font-weight:600;line-height:1.5}
+.cal-top{display:flex;justify-content:space-between;align-items:center;gap:2px}
+.cal-c{font-size:11px;color:var(--muted);line-height:1.2;white-space:nowrap}
+.cal-d b{font-size:14px;font-weight:650;line-height:1.2;color:var(--fg);white-space:nowrap;text-align:right}
+.cal-d.up b{color:var(--pos)} .cal-d.down b{color:var(--neg)}
+.tfocus{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;font-weight:600}
+.vtag{margin-left:6px;font-size:12px;color:var(--muted);border:1px solid var(--line-2);border-radius:5px;padding:0 5px;vertical-align:1px}
+.tlist .trade-row{grid-template-columns:minmax(0,2.2fr) .8fr .8fr .8fr .9fr minmax(64px,.6fr)}
+.tlist .trade-row .sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:1000px){
+  .tlayout{grid-template-columns:minmax(0,1fr)}
+  .tside{position:static;max-width:460px;width:100%;justify-self:center}
+}
+@media (max-width:760px){
+  .tlist .trade-row{grid-template-columns:minmax(0,1fr) auto}
+  .mpick b{min-width:0}
+  /* 手机上格子只放日期和当天合计 R，笔数看列表 */
+  .cal-d{min-height:48px;padding:4px 3px;align-items:center}
+  .cal-top{justify-content:center}
+  .cal-d .cal-c{display:none}
+  .cal-d b{font-size:11px;letter-spacing:-.02em}
+  .cal-d.flat::after{content:"";width:5px;height:5px;border-radius:50%;background:var(--idle)}
+}
 
 /* 规则页 */
 .kill{padding:14px 16px;display:grid;gap:6px;font-size:15px}

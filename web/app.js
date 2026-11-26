@@ -567,7 +567,7 @@ function checklistPanel(def) {
   return el("div", "panel ck-panel", el("div", "ck-legend sub", el("span", "", el("span", "ck-dot rule"), "规则项：没满足记为违规开仓"), el("span", "", el("span", "ck-dot attention"), "注意项：只记录，不算违规")), el("div", "ck-grid", ...cards));
 }
 // 统计、交易、规则三页共用：页头、版本切换与历史版本提示。
-const PAGES = { stats: "统计", trades: "交易", rules: "规则" };
+const PAGES = { stats: "统计", rules: "规则" };
 function versionBar(page, strategy, v) {
   const current = strategy.versions[strategy.versions.length - 1].version;
   if (strategy.versions.length < 2) return el("span", "vone num", `v${v.no} · 当前版本`);
@@ -642,63 +642,108 @@ function renderStats(strategy, detail) {
     section("按趋势阶段", groupRows("阶段", report.phases, phaseName), thin()),
     section("附加检验", checks, el("span", "sub", "按规则单")));
 }
-// 交易页：按开仓日期分组，顶部筛选只在本页切换，不重新请求。
-let tradeFilter = "all";
-const TRADE_FILTERS = [["all", "全部", () => true], ["open", "持仓中", t => t.status === "open"], ["followed", "按规则", t => t.status === "closed" && !t.violations?.length], ["violated", "有违规", t => t.violations?.length > 0]];
-function dayKey(value) {
-  const d = new Date(value);
-  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-}
-const dayName = value => new Date(value).toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "short" });
-function tradeRow(trade, def, readonly) {
-  const row = button("", () => tradeModal("edit", trade, readonly, def), "row link trade-row trade-button");
-  const time = new Date(trade.opened_at).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" });
+// 交易页：按月看，月历 + 列表。已平仓的单子归入平仓那天（R 在那天兑现），持仓中的归入开仓那天。
+// 筛选和选中的日期只在本页切换，不重新请求；换月时清掉选中的日期。
+const tradeView = { filter: "all", day: "", month: "" };
+const TRADE_FILTERS = [["all", "全部", () => true], ["followed", "按规则", t => t.status === "closed" && !t.violations?.length], ["violated", "有违规", t => t.violations?.length > 0], ["open", "持仓中", t => t.status === "open"]];
+const tradeAt = t => new Date(t.status === "closed" ? t.closed_at : t.opened_at);
+const dayKey = d => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+const dayName = d => d.toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "short" });
+const hhmm = d => d.toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" });
+function tradeRow(trade) {
+  const readonly = trade.version_id !== overview.version.id;
+  const row = button("", async () => tradeModal("edit", trade, readonly, await definitionOf(trade)), "row link trade-row trade-button");
+  const old = trade.version_no !== overview.version.no ? el("span", "vtag num", `v${trade.version_no}`) : null;
   row.append(
-    el("div", "", el("div", "sname num", trade.symbol, " ", el("span", `side ${trade.side}`, trade.side === "long" ? "多" : "空")), el("div", "sub", el("span", "num", time), ` ${setupName(trade.setup)} · ${phaseName(trade.phase)}`)),
+    el("div", "", el("div", "sname num", trade.symbol, " ", el("span", `side ${trade.side}`, trade.side === "long" ? "多" : "空"), old),
+      el("div", "sub", el("span", "num", `${trade.status === "closed" ? "平" : "开"} ${hhmm(tradeAt(trade))}`), ` ${setupName(trade.setup)} · ${phaseName(trade.phase)}`)),
     el("div", "num hide-m", fmt(trade.entry, 8)), el("div", "num hide-m", trade.status === "open" ? "—" : fmt(trade.exit, 8)),
     el("div", "sub hide-m", trade.status === "open" ? "—" : { stop: "止损", target: "止盈", manual: "主动离场" }[trade.exit_reason] || "—"),
-    el("div", "hide-m", violationTag(trade, def) || el("span", "faint", "—")),
+    el("div", "hide-m", violationTag(trade, overview.definition) || el("span", "faint", "—")),
     el("div", "t-r", trade.status === "open" ? el("span", "tag t-idle", "持仓中") : el("b", `num ${tone(trade.r)}`, rfmt(trade.r))));
   return row;
 }
-function renderTrades(strategy, detail) {
-  const v = detail.version, def = detail.definition;
-  const current = strategy.versions[strategy.versions.length - 1].version;
-  const readonly = v.id !== current.id;
-  const all = [...detail.trades].sort((a, b) => new Date(b.opened_at) - new Date(a.opened_at));
-  const list = el("div", "tlist");
-  const chips = el("div", "chips");
+const daySum = trades => trades.filter(t => t.status === "closed").reduce((a, t) => a + t.r, 0);
+function calendar(start, byDay, maxAbs) {
+  const today = dayKey(new Date());
+  const cal = el("div", "cal", ...["一", "二", "三", "四", "五", "六", "日"].map(w => el("div", "cal-w", w)));
+  const lead = (start.getDay() + 6) % 7;
+  for (let i = 0; i < lead; i++) cal.append(el("div", "cal-pad"));
+  const days = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
+  for (let d = 1; d <= days; d++) {
+    const at = new Date(start.getFullYear(), start.getMonth(), d), key = dayKey(at), list = byDay.get(key) || [];
+    const closedN = list.filter(t => t.status === "closed").length, sum = daySum(list);
+    const cell = button("", () => { tradeView.day = tradeView.day === key ? "" : key; drawTrades(); }, `cal-d${key === today ? " today" : ""}${key === tradeView.day ? " on" : ""}`);
+    const top = el("span", "cal-top", el("span", "cal-n num", String(d)));
+    cell.append(top);
+    if (list.length) {
+      // 底色深浅按当天合计 R 相对本月最大值，盈利绿、亏损红。
+      if (closedN && sum) cell.style.setProperty("--heat", `${Math.round(10 + 30 * Math.min(1, Math.abs(sum) / maxAbs))}%`);
+      cell.classList.add(closedN && sum > 0 ? "up" : closedN && sum < 0 ? "down" : "flat");
+      top.append(el("span", "cal-c num", `${list.length}笔`));
+      cell.append(closedN ? el("b", "num", rfmt(sum)) : el("span", "cal-c", "持仓"));
+      cell.setAttribute("aria-label", `${dayName(at)}，${list.length} 笔${closedN ? `，合计 ${rfmt(sum)}` : ""}`);
+    } else {
+      cell.disabled = true;
+    }
+    cell.setAttribute("aria-pressed", String(key === tradeView.day));
+    cal.append(cell);
+  }
+  return el("div", "panel cal-box", cal);
+}
+let drawTrades = () => {};
+function renderTrades(m, start, current) {
+  const monthKey = `${start.getFullYear()}-${start.getMonth()}`;
+  if (tradeView.month !== monthKey) { tradeView.month = monthKey; tradeView.day = ""; }
+  const shift = n => monthHash(new Date(start.getFullYear(), start.getMonth() + n, 1));
+  const isCurrent = start.getTime() === current.getTime();
+  const next = link("›", shift(1), "btn mnav");
+  next.setAttribute("aria-label", "下个月");
+  if (isCurrent) { next.removeAttribute("href"); next.setAttribute("aria-disabled", "true"); }
+  const prev = link("‹", shift(-1), "btn mnav");
+  prev.setAttribute("aria-label", "上个月");
+  const months = el("div", "mpick", prev, el("b", "num", `${start.getFullYear()} 年 ${start.getMonth() + 1} 月`), next, isCurrent ? null : link("回到本月", "#trades", "btn btn-sm"));
+  const has = m.n > 0, cards = el("div", "panel stats");
+  [["已平仓", `${m.n} 笔`], ["累计", rfmt(has ? m.total_r : null), has && tone(m.total_r)], ["每笔期望 E", rfmt(has ? m.expectancy : null), has && tone(m.expectancy)], ["胜率", has ? pct(m.win_rate) : "—"],
+    ["按规则执行率", has ? pct(m.followed_rate) : "—"], ["违规单", has ? `${m.violated_n} 笔` : "—"], ["违规单累计", rfmt(m.violated_n ? m.violated_r : null), m.violated_n && tone(m.violated_r)], ["最大回撤", has ? ddfmt(m.max_drawdown_r) : "—"]]
+    .forEach(([label, value, cls]) => cards.append(el("div", "stat", el("small", "", label), el("b", `num ${cls || ""}`, value))));
+  const all = [...m.trades].sort((a, b) => tradeAt(b) - tradeAt(a));
+  const chips = el("div", "chips"), side = el("div", "tside"), list = el("div", "tlist");
   chips.setAttribute("role", "group");
   chips.setAttribute("aria-label", "筛选交易");
-  function draw() {
-    const [, , test] = TRADE_FILTERS.find(([key]) => key === tradeFilter) || TRADE_FILTERS[0];
+  drawTrades = () => {
+    const [, , test] = TRADE_FILTERS.find(([key]) => key === tradeView.filter) || TRADE_FILTERS[0];
     chips.replaceChildren(...TRADE_FILTERS.map(([key, name, match]) => {
-      const b = button("", () => { tradeFilter = key; draw(); }, `chip${key === tradeFilter ? " on" : ""}`);
-      b.setAttribute("aria-pressed", String(key === tradeFilter));
+      const b = button("", () => { tradeView.filter = key; drawTrades(); }, `chip${key === tradeView.filter ? " on" : ""}`);
+      b.setAttribute("aria-pressed", String(key === tradeView.filter));
       b.append(name, el("span", "num", String(all.filter(match).length)));
       return b;
     }));
-    const shown = all.filter(test);
-    if (!shown.length) { list.replaceChildren(el("div", "panel", empty(all.length ? "没有符合筛选的交易。" : readonly ? "这个版本没有交易。" : "还没有交易，点右上角“记一笔”开始。"))); return; }
-    const days = [];
+    const shown = all.filter(test), byDay = new Map();
     for (const t of shown) {
-      const last = days[days.length - 1];
-      if (last && last.key === dayKey(t.opened_at)) last.trades.push(t);
-      else days.push({ key: dayKey(t.opened_at), at: t.opened_at, trades: [t] });
+      const key = dayKey(tradeAt(t));
+      if (!byDay.has(key)) byDay.set(key, []);
+      byDay.get(key).push(t);
     }
-    const panel = el("div", "panel rows", el("div", "row head trade-row", ...["品种 / 开仓时间", "入场", "出场", "出场原因", "执行", "R"].map((t, i) => el("div", i === 5 ? "t-r" : "", t))));
-    for (const d of days) {
-      const closed = d.trades.filter(t => t.status === "closed");
-      const sum = closed.reduce((a, t) => a + t.r, 0);
-      panel.append(el("div", "tday", el("h2", "", dayName(d.at)), el("span", "sub", `${d.trades.length} 笔`, closed.length ? el("span", "", " · 已平仓 ", el("b", `num ${tone(sum)}`, rfmt(sum))) : null)),
-        ...d.trades.map(t => tradeRow(t, def, readonly)));
+    if (tradeView.day && !byDay.has(tradeView.day)) tradeView.day = "";
+    const maxAbs = Math.max(1, ...[...byDay.values()].map(ts => Math.abs(daySum(ts))));
+    side.replaceChildren(calendar(start, byDay, maxAbs), el("p", "sub cal-note", "已平仓的单子记在平仓那天，持仓中的记在开仓那天。点日期只看那天，再点一次取消。"));
+    if (!shown.length) { list.replaceChildren(el("div", "panel", empty(all.length ? "这个月没有符合筛选的交易。" : isCurrent ? "这个月还没有交易，点右上角“记一笔”开始。" : "这个月没有交易。"))); return; }
+    const panel = el("div", "panel rows", el("div", "row head trade-row", ...["品种 / 时间", "入场", "出场", "出场原因", "执行", "R"].map((t, i) => el("div", i === 5 ? "t-r" : "", t))));
+    for (const [key, trades] of byDay) {
+      if (tradeView.day && key !== tradeView.day) continue;
+      const closedN = trades.filter(t => t.status === "closed").length, sum = daySum(trades);
+      panel.append(el("div", "tday", el("h2", "", dayName(tradeAt(trades[0]))),
+        el("span", "sub", `${trades.length} 笔`, closedN ? el("span", "", " · 合计 ", el("b", `num ${tone(sum)}`, rfmt(sum))) : null)),
+        ...trades.map(tradeRow));
     }
-    list.replaceChildren(panel);
-  }
-  draw();
+    const head = tradeView.day ? el("div", "tfocus", el("span", "", "只看这一天"), button("看整月", () => { tradeView.day = ""; drawTrades(); }, "btn btn-sm")) : null;
+    list.replaceChildren(...[head, panel].filter(Boolean));
+  };
+  drawTrades();
   $("view").replaceChildren(
-    pageHead("trades", strategy, v, readonly ? `${strategy.strategy.name} v${v.no} · 只读，点开查看` : `${strategy.strategy.name} v${v.no} · 点开修改或删除`),
-    chips, list);
+    el("div", "page-head", el("div", "", el("h1", "", "交易"), el("div", "sub", "各版本合并 · 一个月样本太小，只看执行与结果，不判断有无优势")), months),
+    cards, chips, el("div", "tlayout", side, list));
 }
 function renderRules(strategy, detail) {
   const v = detail.version, def = detail.definition;
@@ -984,29 +1029,12 @@ function tradeModal(mode, trade = {}, readonly = false, def = overview.definitio
 
 // 月份按浏览器本地时区划分，起止时刻交给后端筛选平仓时间。
 function monthOf(hash) {
-  const now = new Date(), match = /^#monthly-(\d{4})-(\d{2})$/.exec(hash);
+  const now = new Date(), match = /^#trades-(\d{4})-(\d{2})$/.exec(hash);
   const current = new Date(now.getFullYear(), now.getMonth(), 1);
   const picked = match && parseNum(match[2]) >= 1 && parseNum(match[2]) <= 12 ? new Date(parseNum(match[1]), parseNum(match[2]) - 1, 1) : current;
   return { start: picked > current ? current : picked, current };
 }
-const monthHash = d => `#monthly-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-function renderMonthly(m, start, current) {
-  const shift = n => new Date(start.getFullYear(), start.getMonth() + n, 1);
-  const isCurrent = start.getTime() === current.getTime();
-  const next = button("下月 ›", () => { location.hash = monthHash(shift(1)); });
-  next.disabled = isCurrent;
-  const actions = el("div", "actions", button("‹ 上月", () => { location.hash = monthHash(shift(-1)); }), next);
-  if (!isCurrent) actions.append(button("回到本月", () => { location.hash = "#monthly"; }));
-  const has = m.n > 0, followedN = m.n - m.violated_n;
-  const cards = el("div", "panel stats");
-  [["已平仓", `${m.n} 笔`], ["累计", rfmt(has ? m.total_r : null), has && tone(m.total_r)], ["每笔期望 E", rfmt(has ? m.expectancy : null), has && tone(m.expectancy)], ["胜率", has ? pct(m.win_rate) : "—"],
-    ["平均盈利", rfmt(has && m.win_rate > 0 ? m.avg_win : null), has && m.win_rate > 0 && tone(m.avg_win)], ["平均亏损", rfmt(has && m.win_rate < 1 ? m.avg_loss : null), has && m.win_rate < 1 && tone(m.avg_loss)], ["最大回撤", has ? ddfmt(m.max_drawdown_r) : "—"], ["最长连亏", has ? `${m.max_loss_streak} 笔` : "—"],
-    ["按规则执行率", has ? pct(m.followed_rate) : "—"], ["按规则累计", rfmt(followedN ? m.total_r - m.violated_r : null), followedN && tone(m.total_r - m.violated_r)], ["违规单", has ? `${m.violated_n} 笔` : "—"], ["违规单累计", rfmt(m.violated_n ? m.violated_r : null), m.violated_n && tone(m.violated_r)]]
-    .forEach(([label, value, cls]) => cards.append(el("div", "stat", el("small", "", label), el("b", `num ${cls || ""}`, value))));
-  $("view").replaceChildren(
-    el("div", "page-head", el("div", "", el("h1", "", `${start.getFullYear()} 年 ${start.getMonth() + 1} 月`), el("div", "sub", `按平仓时间归月 · ${isCurrent ? "本月至今" : "整月"}`)), actions),
-    cards, el("div", "note", has ? "一个月的样本太小，这里只看执行与结果，不判断策略有无优势。各版本合并统计。" : "本月无已平仓交易。"));
-}
+const monthHash = d => `#trades-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 function renderSettings() {
   const form = el("form", "panel settings-panel");
   const risk = field("默认单笔风险（%）", overview.settings.risk_pct, "decimal");
@@ -1113,7 +1141,8 @@ async function route(options) {
     overview = o;
     const hash = location.hash || "#home";
     // 旧链接 #strategy 指向统计页。
-    const match = /^#(stats|trades|rules|strategy)(?:-v(\d+))?$/.exec(hash);
+    if (/^#monthly/.test(hash)) { location.replace(hash.replace("#monthly", "#trades")); return; }
+    const match = /^#(stats|rules|strategy)(?:-v(\d+))?$/.exec(hash);
     if (match && match[1] === "strategy") { location.replace(`#stats${match[2] ? `-v${match[2]}` : ""}`); return; }
     if (match) {
       const strategy = await api("GET", "/api/strategy");
@@ -1122,13 +1151,13 @@ async function route(options) {
       if (!picked) throw new Error("该策略版本不存在");
       const detail = await api("GET", `/api/versions/${picked.version.id}/stats`);
       if (sequence !== routeSequence) return;
-      ({ stats: renderStats, trades: renderTrades, rules: renderRules })[match[1]](strategy, detail);
-    } else if (hash.startsWith("#monthly")) {
+      (match[1] === "stats" ? renderStats : renderRules)(strategy, detail);
+    } else if (/^#trades(-\d{4}-\d{2})?$/.test(hash)) {
       const { start, current } = monthOf(hash);
       const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
       const m = await api("GET", `/api/monthly?from=${encodeURIComponent(start.toISOString())}&to=${encodeURIComponent(end.toISOString())}`);
       if (sequence !== routeSequence) return;
-      renderMonthly(m, start, current);
+      renderTrades(m, start, current);
     } else if (hash === "#settings") renderSettings();
     else renderHome();
     $("nav").hidden = false;
