@@ -181,6 +181,7 @@ input,select,textarea{width:100%;background:var(--bg);border:1px solid var(--lin
 input.num{font-family:var(--mono)}
 textarea{min-height:64px;resize:vertical}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--focus)}
+input[aria-invalid="true"]{border-color:var(--neg)}
 .seg{display:flex;border:1px solid var(--line-2);border-radius:8px;overflow:hidden}
 .seg button{flex:1;border:0;background:transparent;padding:8px;color:var(--muted)}
 .seg button.on.l{background:var(--pos-bg);color:var(--pos);font-weight:650}
@@ -356,7 +357,8 @@ details.rulebox pre{white-space:pre-wrap;font:inherit;margin:8px 0 0}
 details.raw summary{cursor:pointer;font-size:14px;color:var(--muted)}
 details.raw pre{white-space:pre-wrap;font:14px/1.7 var(--font);margin:10px 0 0;color:var(--muted)}
 /* 开仓清单 */
-.ck{display:grid;gap:10px;min-width:0}
+.ck{display:grid;gap:10px;min-width:0;border:0;margin:0;padding:0}
+.ck>legend{font-size:14px;color:var(--muted);padding:0;margin-bottom:6px}
 .ck-panel{padding:16px;display:grid;gap:12px}
 .ck-legend{display:flex;flex-wrap:wrap;gap:6px 18px}
 .ck-legend>span{display:inline-flex;align-items:center;gap:6px}
@@ -389,7 +391,7 @@ details.raw pre{white-space:pre-wrap;font:14px/1.7 var(--font);margin:10px 0 0;c
 .sheet-wide .fgrid{grid-template-columns:repeat(4,minmax(0,1fr))}
 .sheet-wide .fgrid .full{grid-column:1/-1}
 .sheet-status{margin-right:auto;font-size:14px;color:var(--muted);min-width:0;flex:1 1 240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sheet-status.bad{color:var(--warn)} .sheet-status.good{color:var(--pos)}
+.sheet-status.bad{color:var(--warn)} .sheet-status.err-text{color:var(--neg)} .sheet-status.good{color:var(--pos)}
 .sheet-status b{font-weight:650}
 details.rule-peek{border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:var(--panel-2)}
 details.rule-peek summary{cursor:pointer;font-size:14px;color:var(--muted)}
@@ -398,5 +400,6 @@ details.rule-peek .guide-card{background:var(--panel)}
 @media (max-width:760px){
   .sheet-wide .fgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .guide,.ck-grid{grid-template-columns:minmax(0,1fr)}
-  .sheet-status{white-space:normal;flex-basis:100%}
+  /* 窄屏最多两行，完整内容在下方清单里 */
+  .sheet-status{white-space:normal;flex-basis:100%;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 }

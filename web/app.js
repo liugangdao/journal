@@ -31,8 +31,12 @@ function parseNum(value) {
 function numberOf(input, label, optional = false) {
   if (optional && input.value.trim() === "") return null;
   const value = parseNum(input.value);
-  if (!Number.isFinite(value)) throw new Error(`${label}必须是有效数字`);
+  if (!Number.isFinite(value)) throw invalid(`${label}必须是有效数字`, input);
   return value;
+}
+// 带出错位置的错误：弹窗显示错误时会滚动到该字段并聚焦。
+function invalid(message, node) {
+  return Object.assign(new Error(message), { field: node });
 }
 // 四舍五入后为零的小数显示为 0，不显示 "-0" 或 "+0"。
 function fmt(n, digits = 2) {
@@ -63,7 +67,10 @@ const keyLevelLabel = side => side === "short" ? "主要高点" : "主要低点"
 // 违规项的中文名：方向不一致单独命名，其余取版本定义中的清单项和偏差。
 function violationName(def, key) {
   if (key === "vegas_dir") return "与 1H Vegas 方向相反";
-  return (def.items.find(i => i.key === key) || def.deviations.find(d => d.key === key) || { label: key }).label;
+  // 规则项的原文是应做到的事，作为违规名时标明“未满足”，避免读成做了才违规。
+  const item = def.items.find(i => i.key === key);
+  if (item) return item.kind === "rule" ? `未满足「${item.label}」` : item.label;
+  return (def.deviations.find(d => d.key === key) || { label: key }).label;
 }
 function violationTag(trade, def) {
   if (!trade.violations?.length) return trade.status === "closed" ? el("span", "tag t-pos", "按规则") : null;
@@ -82,6 +89,16 @@ function showError(target, error) {
   if (error.status === 401) return;
   target.textContent = error.message || "操作失败，请稍后重试";
   target.hidden = false;
+  const node = error.field;
+  if (!node?.isConnected) return;
+  // 提交期间控件被禁用，等恢复后再聚焦。
+  requestAnimationFrame(() => {
+    const details = node.closest("details");
+    if (details) details.open = true;
+    node.scrollIntoView({ block: "center", behavior: "smooth" });
+    const focusable = node.matches("input,select,textarea") ? node : node.querySelector("input:checked,input,select,textarea");
+    focusable?.focus({ preventScroll: true });
+  });
 }
 async function api(method, path, body) {
   const requestToken = token;
@@ -463,9 +480,30 @@ function svgNode(tag, attributes = {}, text) {
   if (text != null) node.textContent = text;
   return node;
 }
+// 曲线占满整行：画布宽度等于实际显示宽度，窗口缩放后重画，刻度文字保持原始字号。
 function curve(values) {
-  // 曲线占满整行：画布宽度接近实际显示宽度，文字不会被放大或缩得过小。
-  const W = Math.round(Math.max(420, Math.min(1000, window.innerWidth - 80))), right = W - 20;
+  const panel = el("div", "panel chart", el("div", "sec-h", el("h2", "", "累计 R"), el("span", "sub", "按平仓时间排序")));
+  let drawn = 0;
+  const draw = width => {
+    const W = Math.round(Math.max(300, width));
+    if (Math.abs(W - drawn) < 2) return;
+    drawn = W;
+    const svg = curveSvg(values, W);
+    const old = panel.querySelector("svg");
+    if (old) old.replaceWith(svg); else panel.append(svg);
+  };
+  draw(Math.min(1000, window.innerWidth - 80));
+  if (typeof ResizeObserver === "function") {
+    const observer = new ResizeObserver(([entry]) => {
+      if (!panel.isConnected) { observer.disconnect(); return; }
+      draw(entry.contentRect.width);
+    });
+    observer.observe(panel);
+  }
+  return panel;
+}
+function curveSvg(values, W) {
+  const right = W - 20;
   const svg = svgNode("svg", { viewBox: `0 0 ${W} 240`, role: "img", "aria-label": "按平仓时间排序的累计 R 曲线" });
   const points = values.length ? values : [0];
   let low = 0, high = 0;
@@ -488,7 +526,7 @@ function curve(values) {
   const last = points.length - 1;
   svg.append(svgNode("circle", { cx: x(last), cy: y(points[last]), r: 4, class: "chart-end" }));
   svg.append(svgNode("text", { x: Math.max(100, x(last) - 8), y: Math.max(14, y(points[last]) - 10), "text-anchor": "end", class: `chart-label chart-last ${tone(points[last])}` }, rfmt(points[last])));
-  return el("div", "panel chart", el("div", "sec-h", el("h2", "", "累计 R"), el("span", "sub", "按平仓时间排序")), svg);
+  return svg;
 }
 function checkCard(title, lines, message = "", warn = false) {
   return el("div", "panel check", el("h3", "", title), ...lines.map(([label, value]) => el("div", "line", el("span", "", label), value instanceof Node ? value : num(value))), message ? el("div", warn ? "warnbox" : "okbox", message) : null);
@@ -685,21 +723,21 @@ function tradeModal(mode, trade = {}, readonly = false, def = overview.definitio
       body.symbol = f.symbol.input.value.trim();
       body.side = f.side.input.value;
       body.entry_reason = f.entry_reason.input.value.trim();
-      if (!body.symbol) throw new Error("品种不能为空");
+      if (!body.symbol) throw invalid("品种不能为空", f.symbol.input);
       for (const key of ["entry", "stop", "equity", "risk_pct"]) body[key] = numberOf(f[key].input, f[key].label);
       body.qty = opening && !f.qty.input.value.trim() ? suggested() : numberOf(f.qty.input, "实际数量");
-      if (![body.entry, body.stop, body.equity, body.risk_pct, body.qty].every(n => Number.isFinite(n) && n > 0)) throw new Error("价格、权益、风险比例和数量必须大于 0");
-      if (body.side === "long" ? body.stop >= body.entry : body.stop <= body.entry) throw new Error("止损必须在入场价的亏损一侧");
+      if (![body.entry, body.stop, body.equity, body.risk_pct, body.qty].every(n => Number.isFinite(n) && n > 0)) throw invalid("价格、权益、风险比例和数量必须大于 0", ["entry", "stop", "equity", "risk_pct", "qty"].map(k => f[k].input).find(i => i.value.trim() && !(parseNum(i.value) > 0)) || f.entry.input);
+      if (body.side === "long" ? body.stop >= body.entry : body.stop <= body.entry) throw invalid("止损必须在入场价的亏损一侧", f.stop.input);
       if (opening) {
         body.key_level = numberOf(f.key_level.input, keyLevelLabel(body.side));
-        if (!(body.key_level > 0)) throw new Error(`${keyLevelLabel(body.side)}必须大于 0`);
+        if (!(body.key_level > 0)) throw invalid(`${keyLevelLabel(body.side)}必须大于 0`, f.key_level.input);
         body.phase = f.phase.value();
-        if (!body.phase) throw new Error("请选择开仓时的趋势阶段");
+        if (!body.phase) throw invalid("请选择开仓时的趋势阶段", f.phase.node);
         body.setup = f.checklist.setup();
-        if (!body.setup) throw new Error("请选择 Setup");
+        if (!body.setup) throw invalid("请选择 Setup", f.checklist.setupNode);
         body.exit_plan = f.checklist.plan.value();
-        if (!body.exit_plan) throw new Error("请选择出场计划");
-        if (!f.checklist.value().vegas_dir) throw new Error("请选择 1H Vegas 方向");
+        if (!body.exit_plan) throw invalid("请选择出场计划", f.checklist.planNode);
+        if (!f.checklist.value().vegas_dir) throw invalid("请选择 1H Vegas 方向", f.checklist.vegasNode);
         body.checklist = f.checklist.value();
         if (body.exit_plan === "measured_move") body.target = numberOf(f.target.input, "目标价", true);
       }
@@ -718,8 +756,8 @@ function tradeModal(mode, trade = {}, readonly = false, def = overview.definitio
       if (!closing && !body.review_note.trim()) { body.clear.push("review_note"); delete body.review_note; }
       // 持仓期间的最高、最低价必须包住入场价和出场价，否则最大浮盈 / 浮亏会算错。
       const entryPrice = closing ? trade.entry : body.entry;
-      if (body.high != null && body.high < Math.max(entryPrice, body.exit)) throw new Error("最高价不应低于入场价和出场价，请检查是否填反或填错");
-      if (body.low != null && body.low > Math.min(entryPrice, body.exit)) throw new Error("最低价不应高于入场价和出场价，请检查是否填反或填错");
+      if (body.high != null && body.high < Math.max(entryPrice, body.exit)) throw invalid("最高价不应低于入场价和出场价，请检查是否填反或填错", f.high.input);
+      if (body.low != null && body.low > Math.min(entryPrice, body.exit)) throw invalid("最低价不应高于入场价和出场价，请检查是否填反或填错", f.low.input);
     }
     await api(opening || closing ? "POST" : "PATCH", opening ? "/api/trades" : `/api/trades/${trade.id}${closing ? "/close" : ""}`, body);
     await saved(opening ? "开仓已记录。" : closing ? "已平仓，统计已更新。" : "交易已更新。");
@@ -758,7 +796,7 @@ function tradeModal(mode, trade = {}, readonly = false, def = overview.definitio
       f.checklist = checklistForm(def, () => f.side.input.value);
       f.targetNode = addField("target", "目标价（选填）", "");
       m.body.append(
-        step(1, "交易与仓位", grid, equityWarn, calc, stopError),
+        step(1, "交易与仓位", grid, equityWarn, calc),
         step(2, "背景与 Setup", f.checklist.vegasNode, f.phase.node, f.checklist.setupNode),
         step(3, "开仓清单", f.checklist.itemsNode),
         step(4, "出场计划", f.checklist.planNode, f.targetNode),
@@ -799,8 +837,10 @@ function tradeModal(mode, trade = {}, readonly = false, def = overview.definitio
       const suggestion = suggested();
       qty = opening && !f.qty.input.value.trim() ? suggestion : parseNum(f.qty.input.value);
       const wrongSide = entry > 0 && stop > 0 && (side === "long" ? stop >= entry : stop <= entry);
-      stopError.hidden = !wrongSide;
+      // 开仓弹窗把这条提示放在固定底栏，避免插入表单导致下方内容跳动。
+      stopError.hidden = opening || !wrongSide;
       stopError.textContent = "止损必须在入场价的亏损一侧。";
+      f.stop.input.setAttribute("aria-invalid", String(wrongSide));
       m.submit.disabled = wrongSide;
       const valid = !wrongSide && entry > 0 && stop > 0 && suggestion > 0 && Number.isFinite(suggestion);
       riskValue.textContent = valid && qty > 0 ? `${fmt(qty * Math.abs(entry - stop))} U` : "—";
@@ -814,8 +854,9 @@ function tradeModal(mode, trade = {}, readonly = false, def = overview.definitio
         // 违规也能保存，底栏和按钮文字提醒这笔会记为违规开仓。
         const missing = f.checklist.setup() ? f.checklist.unmet() : [];
         const [done, total] = f.checklist.progress();
-        status.className = `sheet-status ${!f.checklist.setup() ? "" : missing.length ? "bad" : "good"}`;
-        status.replaceChildren(!f.checklist.setup() ? el("span", "", "选择 Setup 后开始勾选清单")
+        status.className = `sheet-status ${wrongSide ? "err-text" : !f.checklist.setup() ? "" : missing.length ? "bad" : "good"}`;
+        status.replaceChildren(wrongSide ? el("span", "", "止损必须在入场价的亏损一侧")
+          : !f.checklist.setup() ? el("span", "", "选择 Setup 后开始勾选清单")
           : missing.length ? el("span", "", el("b", "", `规则 ${done}/${total}`), ` · 未满足：${missing.join("；")}`)
           : el("span", "", el("b", "", `规则 ${done}/${total}`), " · 全部满足"));
         status.title = missing.join("；");
